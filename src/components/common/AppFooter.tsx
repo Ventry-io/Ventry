@@ -1,7 +1,6 @@
 import GitHubIcon from "@mui/icons-material/GitHub";
 import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
-import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import Link from "@mui/material/Link";
 import Stack from "@mui/material/Stack";
@@ -39,8 +38,8 @@ export default function AppFooter() {
             aria-label="Legal links"
             component="nav"
             direction="row"
-            divider={<Divider flexItem orientation="vertical" />}
             spacing={1.5}
+            sx={{ "& > a + a": { borderLeft: 1, borderColor: "divider", pl: 1.5 } }}
           >
             {legalLinks.map((item) => (
               <Link

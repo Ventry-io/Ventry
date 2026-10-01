@@ -15,7 +15,7 @@ vi.mock("@/app/api/auth/auth", () => ({
 
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
 
-import { adminEventFilter } from "@/lib/auth/admin";
+import { adminEventFilter, getAdminFinanceAccess } from "@/lib/auth/admin";
 
 describe("adminEventFilter", () => {
     beforeEach(() => {
@@ -94,5 +94,44 @@ describe("adminEventFilter", () => {
             where: { adminId: "specific-admin-id" },
             select: { organizationId: true },
         });
+    });
+});
+
+describe("getAdminFinanceAccess", () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it("denies an organization without Finances permission", async () => {
+        prismaMock.adminOrganizationMembership.findMany.mockResolvedValue([
+            { organizationId: "org-1", permissions: ["COMMUNITY"], organization: { ownerId: "owner" } },
+        ]);
+        expect((await getAdminFinanceAccess("member", "org-1")).eventFilter).toBeNull();
+    });
+
+    it("allows read-only members with Finances permission", async () => {
+        prismaMock.adminOrganizationMembership.findMany.mockResolvedValue([
+            { organizationId: "org-1", accessLevel: "READ", permissions: ["STRIPE_FINANCES"], organization: { ownerId: "owner" } },
+        ]);
+        expect(await getAdminFinanceAccess("member", "org-1")).toEqual({
+            eventFilter: { organizationId: "org-1" }, hasRestrictedOrganizations: false,
+        });
+    });
+
+    it("allows organization owners without explicit permissions", async () => {
+        prismaMock.adminOrganizationMembership.findMany.mockResolvedValue([
+            { organizationId: "org-1", permissions: [], organization: { ownerId: "owner" } },
+        ]);
+        expect((await getAdminFinanceAccess("owner", "org-1")).eventFilter).toEqual({ organizationId: "org-1" });
+    });
+
+    it("rejects an unknown organization instead of falling back to all finances", async () => {
+        prismaMock.adminOrganizationMembership.findMany.mockResolvedValue([]);
+        expect((await getAdminFinanceAccess("member", "unknown")).eventFilter).toBeNull();
+    });
+
+    it("keeps personal finances available without querying memberships", async () => {
+        expect(await getAdminFinanceAccess("member", "personal")).toEqual({
+            eventFilter: { ownerId: "member" }, hasRestrictedOrganizations: false,
+        });
+        expect(prismaMock.adminOrganizationMembership.findMany).not.toHaveBeenCalled();
     });
 });

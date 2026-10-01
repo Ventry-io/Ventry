@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   Alert,
   Avatar,
@@ -19,9 +19,7 @@ import {
   Grid,
   IconButton,
   InputAdornment,
-  MenuItem,
   Paper,
-  Select,
   Stack,
   Tab,
   Tabs,
@@ -35,9 +33,19 @@ import {
   Typography,
 } from "@mui/material";
 import { Block, Business, Delete, Edit, PersonRemove, Send } from "@mui/icons-material";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useSearchParams } from "next/navigation";
+
+import CrewHub, { CrewAssignmentFields } from "./CrewHub";
+import type { CrewAssignment } from "@/types/schemas/crew";
+
+const subscribeToOrigin = () => () => {};
+
+function useOrigin() {
+  return useSyncExternalStore(subscribeToOrigin, () => window.location.origin, () => "");
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,7 +63,8 @@ interface OrgSummary {
   _count: { members: number; events: number };
 }
 
-interface OrgMember {
+interface OrgMember extends CrewAssignment {
+  department?: { name: string } | null;
   adminId: string;
   permissions: OrgPermission[];
   joinedAt: string;
@@ -65,7 +74,8 @@ interface OrgMember {
   };
 }
 
-interface OrgInvitation {
+interface OrgInvitation extends CrewAssignment {
+  department?: { name: string } | null;
   id: string;
   token: string;
   invitedEmail: string;
@@ -100,6 +110,14 @@ const STATUS_COLOR: Record<
   ACCEPTED: "success",
   DECLINED: "error",
   EXPIRED: "default",
+};
+
+const CREW_TABLE_SX = {
+  "& thead": { display: { xs: "none", md: "table-header-group" } },
+  "& tbody": { display: { xs: "block", md: "table-row-group" } },
+  "& tbody tr": { display: { xs: "block", md: "table-row" }, borderBottom: { xs: "1px solid", md: 0 }, borderColor: "divider" },
+  "& tbody td": { display: { xs: "block", md: "table-cell" }, borderBottom: { xs: 0, md: "1px solid" }, borderColor: "divider", overflowWrap: "anywhere" },
+  "& td[data-label]::before": { content: { xs: "attr(data-label)", md: "none" }, display: "block", color: "text.secondary", fontSize: "0.75rem", mb: 0.5 },
 };
 
 // ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -150,20 +168,18 @@ function PermissionsChips({ permissions }: { permissions: OrgPermission[] }) {
 // ─── OrgSettings (root) ───────────────────────────────────────────────────────
 
 export default function OrgSettings() {
+  const orgFilter = useSearchParams().get("orgFilter");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [myAdminId, setMyAdminId] = useState<string | null>(null);
   const [orgs, setOrgs] = useState<OrgSummary[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [profileRes, orgsRes] = await Promise.all([
-        fetch("/api/admin/profile"),
-        fetch("/api/admin/organizations"),
-      ]);
+  const load = useCallback(() => {
+    return Promise.all([
+      fetch("/api/admin/profile"),
+      fetch("/api/admin/organizations"),
+    ]).then(async ([profileRes, orgsRes]) => {
       if (!profileRes.ok) throw new Error("Failed to load profile");
       if (!orgsRes.ok) throw new Error("Failed to load organizations");
       const { admin } = (await profileRes.json()) as { admin: { id: string } };
@@ -171,16 +187,17 @@ export default function OrgSettings() {
         organizations: OrgSummary[];
       };
       setMyAdminId(admin.id);
+      setError(null);
       setOrgs(organizations);
       setSelectedOrgId((prev) => {
         if (prev && organizations.some((o) => o.id === prev)) return prev;
         return organizations[0]?.id ?? null;
       });
-    } catch (err) {
+    }).catch((err) => {
       setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
+    }).finally(() => {
       setLoading(false);
-    }
+    });
   }, []);
 
   useEffect(() => {
@@ -215,32 +232,10 @@ export default function OrgSettings() {
     return <CreateOrgForm onCreated={load} />;
   }
 
-  const selectedOrg = orgs.find((o) => o.id === selectedOrgId) ?? orgs[0];
+  const selectedOrg = orgs.find((o) => o.id === orgFilter) ?? orgs.find((o) => o.id === selectedOrgId) ?? orgs[0];
 
   return (
     <Box>
-      {orgs.length > 1 && (
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 3 }}>
-          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
-            Organization:
-          </Typography>
-          <Select
-            size="small"
-            value={selectedOrg.id}
-            onChange={(e) => setSelectedOrgId(e.target.value)}
-            sx={{ minWidth: 220 }}
-          >
-            {orgs.map((o) => (
-              <MenuItem key={o.id} value={o.id}>
-                {o.name}
-                {o.ownerId === myAdminId && (
-                  <Chip label="Owner" size="small" color="primary" sx={{ ml: 1, height: 18, fontSize: "0.65rem" }} />
-                )}
-              </MenuItem>
-            ))}
-          </Select>
-        </Stack>
-      )}
       <OrgDashboard
         key={selectedOrg.id}
         org={selectedOrg}
@@ -262,17 +257,18 @@ export default function OrgSettings() {
 
 // ─── CreateOrgForm ────────────────────────────────────────────────────────────
 
-function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
+function CreateOrgForm({ onCreated }: { onCreated: () => Promise<void> }) {
+  const origin = useOrigin();
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const slugManuallyEdited = useRef(false);
 
   const form = useForm<CreateOrgData>({
     resolver: zodResolver(createOrgSchema),
     mode: "onBlur",
   });
 
-  const orgName = form.watch("name") ?? "";
+  const orgName = useWatch({ control: form.control, name: "name" }) ?? "";
+  const slugManuallyEdited = !!form.formState.dirtyFields.slug;
 
   const generateSlug = useCallback(
     (name: string) =>
@@ -284,10 +280,10 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
   );
 
   useEffect(() => {
-    if (!slugManuallyEdited.current && orgName) {
+    if (!slugManuallyEdited && orgName) {
       form.setValue("slug", generateSlug(orgName), { shouldValidate: false });
     }
-  }, [orgName, form, generateSlug]);
+  }, [orgName, form, generateSlug, slugManuallyEdited]);
 
   const onSubmit = form.handleSubmit(async (data) => {
     setSubmitting(true);
@@ -303,7 +299,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
         setServerError(body.error ?? "Failed to create organization");
         return;
       }
-      onCreated();
+      await onCreated();
     } catch {
       setServerError("An unexpected error occurred");
     } finally {
@@ -349,11 +345,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
             fullWidth
             margin="normal"
             placeholder="my-organization"
-            {...form.register("slug", {
-              onChange: () => {
-                slugManuallyEdited.current = true;
-              },
-            })}
+            {...form.register("slug")}
             error={!!form.formState.errors.slug}
             helperText={
               form.formState.errors.slug?.message ??
@@ -364,7 +356,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
                 startAdornment: (
                   <InputAdornment position="start">
                     <Typography variant="body2" color="text.secondary">
-                      ventry.io/org/
+                      {origin}/org/
                     </Typography>
                   </InputAdornment>
                 ),
@@ -414,6 +406,7 @@ function OrgDashboard({
   onOrgDeleted: () => void;
 }) {
   const [tab, setTab] = useState(0);
+  const origin = useOrigin();
   const isOwner = org.ownerId === myAdminId;
 
   return (
@@ -427,7 +420,7 @@ function OrgDashboard({
             {org.name}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            ventry.io/org/{org.slug} · {org._count.members} member
+            {origin}/org/{org.slug} · {org._count.members} member
             {org._count.members !== 1 ? "s" : ""} · {org._count.events} event
             {org._count.events !== 1 ? "s" : ""}
           </Typography>
@@ -436,17 +429,22 @@ function OrgDashboard({
 
       <Paper variant="outlined" sx={{ borderRadius: 2 }}>
         <Tabs
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
           value={tab}
           onChange={(_, v: number) => setTab(v)}
-          sx={{ borderBottom: 1, borderColor: "divider", px: 2 }}
+          sx={{ borderBottom: 1, borderColor: "divider", px: { xs: 0, sm: 2 } }}
         >
+          <Tab label="Crew hub" />
           <Tab label="Details" />
           <Tab label="Members" />
           <Tab label="Invitations" />
         </Tabs>
 
-        <Box sx={{ p: 3 }}>
-          {tab === 0 && (
+        <Box sx={{ p: { xs: 2, sm: 3 } }}>
+          {tab === 0 && <CrewHub orgId={org.id} isOwner={isOwner} />}
+          {tab === 1 && (
             <OrgDetailsTab
               org={org}
               isOwner={isOwner}
@@ -454,7 +452,7 @@ function OrgDashboard({
               onDeleted={onOrgDeleted}
             />
           )}
-          {tab === 1 && (
+          {tab === 2 && (
             <OrgMembersTab
               orgId={org.id}
               ownerId={org.ownerId}
@@ -462,7 +460,7 @@ function OrgDashboard({
               isOwner={isOwner}
             />
           )}
-          {tab === 2 && (
+          {tab === 3 && (
             <OrgInvitationsTab orgId={org.id} isOwner={isOwner} />
           )}
         </Box>
@@ -485,6 +483,7 @@ function OrgDetailsTab({
   onDeleted: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const origin = useOrigin();
   const [saving, setSaving] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -622,7 +621,7 @@ function OrgDetailsTab({
               URL Slug
             </Typography>
             <Typography variant="body1" sx={{ fontFamily: "monospace" }}>
-              ventry.io/org/{org.slug}
+              {origin}/org/{org.slug}
             </Typography>
             <Typography variant="caption" color="text.secondary">
               Slug cannot be changed after creation.
@@ -742,22 +741,25 @@ function OrgDetailsTab({
 function PermissionsDialog({
   open,
   initialPermissions,
+  assignment,
+  orgId,
   memberName,
+  error,
   onClose,
   onSave,
 }: {
   open: boolean;
   initialPermissions: OrgPermission[];
+  assignment: CrewAssignment;
+  orgId: string;
   memberName: string;
+  error: string | null;
   onClose: () => void;
-  onSave: (permissions: OrgPermission[]) => Promise<void>;
+  onSave: (permissions: OrgPermission[], assignment: CrewAssignment) => Promise<void>;
 }) {
   const [permissions, setPermissions] = useState<OrgPermission[]>(initialPermissions);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (open) setPermissions(initialPermissions);
-  }, [open, initialPermissions]);
+  const [crew, setCrew] = useState(assignment);
 
   const toggle = (p: OrgPermission) => {
     setPermissions((prev) =>
@@ -767,14 +769,16 @@ function PermissionsDialog({
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave(permissions);
-    setSaving(false);
+    try { await onSave(permissions, crew); } finally { setSaving(false); }
   };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Edit permissions — {memberName}</DialogTitle>
+      <DialogTitle>Edit crew member — {memberName}</DialogTitle>
       <DialogContent>
+        {error ? <Alert severity="error">{error}</Alert> : null}
+        <CrewAssignmentFields orgId={orgId} value={crew} onChange={setCrew} />
+        <Typography sx={{ mt: 2 }}>Additional permissions</Typography>
         <FormGroup>
           {ALL_PERMISSIONS.map((p) => (
             <FormControlLabel
@@ -823,21 +827,21 @@ function OrgMembersTab({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<OrgMember | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<OrgMember | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/admin/organizations/${orgId}/members`);
+  const load = useCallback(() => {
+    return fetch(`/api/admin/organizations/${orgId}/members`).then(async (res) => {
       if (!res.ok) throw new Error("Failed to load members");
       const { members } = (await res.json()) as { members: OrgMember[] };
       setMembers(members);
       setError(null);
-    } catch (err) {
+    }).catch((err) => {
       setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
+    }).finally(() => {
       setLoading(false);
-    }
+    });
   }, [orgId]);
 
   useEffect(() => {
@@ -847,19 +851,25 @@ function OrgMembersTab({
   const updatePermissions = async (
     targetAdminId: string,
     permissions: OrgPermission[],
+    assignment: CrewAssignment,
   ) => {
     setActionError(null);
-    const res = await fetch(
-      `/api/admin/organizations/${orgId}/members/${targetAdminId}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ permissions }),
-      },
-    );
-    if (!res.ok) {
-      const body = (await res.json()) as { error?: string };
-      setActionError(body.error ?? "Failed to update permissions");
+    try {
+      const res = await fetch(
+        `/api/admin/organizations/${orgId}/members/${targetAdminId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ permissions, ...assignment }),
+        },
+      );
+      if (!res.ok) {
+        const body = (await res.json()) as { error?: string };
+        setActionError(body.error ?? "Failed to update permissions");
+        return;
+      }
+    } catch {
+      setActionError("Connection failed. Your changes are still in the form. Please retry.");
       return;
     }
     setEditTarget(null);
@@ -868,16 +878,24 @@ function OrgMembersTab({
 
   const removeMember = async (targetAdminId: string) => {
     setActionError(null);
-    const res = await fetch(
-      `/api/admin/organizations/${orgId}/members/${targetAdminId}`,
-      { method: "DELETE" },
-    );
-    if (!res.ok) {
-      const body = (await res.json()) as { error?: string };
-      setActionError(body.error ?? "Failed to remove member");
-      return;
+    setRemoving(true);
+    try {
+      const res = await fetch(`/api/admin/organizations/${orgId}/members/${targetAdminId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.error || "Failed to remove member");
+      }
+      setRemoveTarget(null);
+      if (targetAdminId === myAdminId) {
+        window.location.assign("/admin/organization");
+      } else {
+        await load();
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Connection failed. Please retry.");
+    } finally {
+      setRemoving(false);
     }
-    await load();
   };
 
   if (loading) {
@@ -897,10 +915,12 @@ function OrgMembersTab({
         </Alert>
       )}
 
-      <Table size="small">
+      <Box sx={{ overflowX: "auto" }}><Table size="small" sx={CREW_TABLE_SX}>
         <TableHead>
           <TableRow>
             <TableCell>Member</TableCell>
+            <TableCell>Department / role</TableCell>
+            <TableCell>Access</TableCell>
             <TableCell>Permissions</TableCell>
             <TableCell>Joined</TableCell>
             <TableCell align="right">Actions</TableCell>
@@ -918,7 +938,7 @@ function OrgMembersTab({
                       src={member.admin.user.image ?? undefined}
                       sx={{ width: 32, height: 32, fontSize: "0.8rem" }}
                     >
-                      {member.admin.user.name.charAt(0).toUpperCase()}
+                      {(member.admin.user.name || member.admin.user.email).charAt(0).toUpperCase()}
                     </Avatar>
                     <Box>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
@@ -948,7 +968,9 @@ function OrgMembersTab({
                     </Box>
                   </Stack>
                 </TableCell>
-                <TableCell>
+                <TableCell data-label="Department / role">{member.department?.name || "Unassigned"}<Typography variant="caption" display="block">{member.role || "No role assigned"}</Typography></TableCell>
+                <TableCell data-label="Access">{isThisOwner ? "Owner" : member.accessLevel === "READ" ? "Read only" : "Read and write"}</TableCell>
+                <TableCell data-label="Permissions">
                   {isThisOwner ? (
                     <Typography variant="body2" color="text.secondary">
                       All permissions
@@ -957,7 +979,7 @@ function OrgMembersTab({
                     <PermissionsChips permissions={member.permissions} />
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell data-label="Joined">
                   <Typography variant="caption" color="text.secondary">
                     {new Date(member.joinedAt).toLocaleDateString("en-GB")}
                   </Typography>
@@ -981,7 +1003,7 @@ function OrgMembersTab({
                           aria-label={isMe ? "Leave organization" : "Remove member"}
                           size="small"
                           color="error"
-                          onClick={() => void removeMember(member.adminId)}
+                          onClick={() => { setActionError(null); setRemoveTarget(member); }}
                         >
                           <PersonRemove fontSize="small" />
                         </IconButton>
@@ -993,15 +1015,30 @@ function OrgMembersTab({
             );
           })}
         </TableBody>
-      </Table>
+      </Table></Box>
+
+      <Dialog open={!!removeTarget} onClose={() => { if (!removing) setRemoveTarget(null); }}>
+        <DialogTitle>{removeTarget?.adminId === myAdminId ? "Leave this organization?" : `Remove ${removeTarget?.admin.user.name || removeTarget?.admin.user.email}?`}</DialogTitle>
+        <DialogContent>
+          {actionError ? <Alert severity="error">{actionError}</Alert> : null}
+          <Typography>Crew access to this organization and its events will end. Registrations remain unchanged.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={removing} onClick={() => setRemoveTarget(null)}>Cancel</Button>
+          <Button disabled={removing} color="error" onClick={() => removeTarget && void removeMember(removeTarget.adminId)}>{removing ? "Removing…" : removeTarget?.adminId === myAdminId ? "Leave organization" : "Remove"}</Button>
+        </DialogActions>
+      </Dialog>
 
       {editTarget && (
         <PermissionsDialog
           open
+          error={actionError}
+          orgId={orgId}
+          assignment={{ accessLevel: editTarget.accessLevel || "WRITE", departmentId: editTarget.departmentId || null, role: editTarget.role || null }}
           initialPermissions={editTarget.permissions}
           memberName={editTarget.admin.user.name}
           onClose={() => setEditTarget(null)}
-          onSave={(perms) => updatePermissions(editTarget.adminId, perms)}
+          onSave={(perms, assignment) => updatePermissions(editTarget.adminId, perms, assignment)}
         />
       )}
     </Box>
@@ -1022,9 +1059,11 @@ function OrgInvitationsTab({
   const [error, setError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState<string | null>(null);
+  const [emailFailed, setEmailFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [crew, setCrew] = useState<CrewAssignment>({ accessLevel: "READ", departmentId: null, role: null });
   const [invitePermissions, setInvitePermissions] = useState<OrgPermission[]>([]);
 
   const inviteForm = useForm<InviteData>({
@@ -1032,19 +1071,17 @@ function OrgInvitationsTab({
     mode: "onBlur",
   });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/admin/organizations/${orgId}/invitations`);
+  const load = useCallback(() => {
+    return fetch(`/api/admin/organizations/${orgId}/invitations`).then(async (res) => {
       if (!res.ok) throw new Error("Failed to load invitations");
       const { invitations } = (await res.json()) as { invitations: OrgInvitation[] };
       setInvitations(invitations);
       setError(null);
-    } catch (err) {
+    }).catch((err) => {
       setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
+    }).finally(() => {
       setLoading(false);
-    }
+    });
   }, [orgId]);
 
   useEffect(() => {
@@ -1059,16 +1096,19 @@ function OrgInvitationsTab({
       const res = await fetch(`/api/admin/organizations/${orgId}/invitations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: data.email, permissions: invitePermissions }),
+        body: JSON.stringify({ email: data.email, permissions: invitePermissions, ...crew }),
       });
       if (!res.ok) {
         const body = (await res.json()) as { error?: string };
         setSendError(body.error ?? "Failed to send invitation");
         return;
       }
-      setSendSuccess(`Invitation sent to ${data.email}`);
+      const result = await res.json();
+      setEmailFailed(result.emailSent === false);
+      setSendSuccess(result.emailSent === false ? `Invitation created for ${data.email}. Email delivery failed; copy the invitation link below.` : `Invitation sent to ${data.email}`);
       inviteForm.reset();
       setInvitePermissions([]);
+      setCrew({ accessLevel: "READ", departmentId: null, role: null });
       await load();
     } catch {
       setSendError("An unexpected error occurred");
@@ -1126,7 +1166,7 @@ function OrgInvitationsTab({
             </Alert>
           )}
           {sendSuccess && (
-            <Alert severity="success" sx={{ mb: 2 }}>
+            <Alert severity={emailFailed ? "warning" : "success"} sx={{ mb: 2 }}>
               {sendSuccess}
             </Alert>
           )}
@@ -1140,9 +1180,10 @@ function OrgInvitationsTab({
               type="email"
               {...inviteForm.register("email")}
               error={!!inviteForm.formState.errors.email}
-              helperText={inviteForm.formState.errors.email?.message}
+              helperText={inviteForm.formState.errors.email?.message || "Only existing organizer accounts can join your crew. Invitations expire after 7 days."}
             />
 
+            <CrewAssignmentFields orgId={orgId} value={crew} onChange={setCrew} />
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 0.5 }}>
               Permissions
             </Typography>
@@ -1188,10 +1229,11 @@ function OrgInvitationsTab({
           No invitations yet.
         </Typography>
       ) : (
-        <Table size="small">
+        <Box sx={{ overflowX: "auto" }}><Table size="small" sx={CREW_TABLE_SX}>
           <TableHead>
             <TableRow>
-              <TableCell>Email</TableCell>
+              <TableCell>Email / assignment</TableCell>
+              <TableCell>Access</TableCell>
               <TableCell>Permissions</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Invited by</TableCell>
@@ -1204,11 +1246,13 @@ function OrgInvitationsTab({
               <TableRow key={inv.id}>
                 <TableCell>
                   <Typography variant="body2">{inv.invitedEmail}</Typography>
+                  <Typography variant="caption">{[inv.department?.name, inv.role].filter(Boolean).join(" · ")}</Typography>
                 </TableCell>
-                <TableCell>
+                <TableCell data-label="Access">{inv.accessLevel === "READ" ? "Read only" : "Read and write"}</TableCell>
+                <TableCell data-label="Permissions">
                   <PermissionsChips permissions={inv.permissions} />
                 </TableCell>
-                <TableCell>
+                <TableCell data-label="Status">
                   <Chip
                     label={
                       inv.status.charAt(0) + inv.status.slice(1).toLowerCase()
@@ -1218,12 +1262,12 @@ function OrgInvitationsTab({
                     variant={inv.status === "PENDING" ? "filled" : "outlined"}
                   />
                 </TableCell>
-                <TableCell>
+                <TableCell data-label="Invited by">
                   <Typography variant="caption" color="text.secondary">
                     {inv.invitedByAdmin.user.name}
                   </Typography>
                 </TableCell>
-                <TableCell>
+                <TableCell data-label="Expires">
                   <Typography variant="caption" color="text.secondary">
                     {inv.status === "PENDING"
                       ? new Date(inv.expiresAt) < new Date()
@@ -1235,28 +1279,44 @@ function OrgInvitationsTab({
                 {isOwner && (
                   <TableCell align="right">
                     {inv.status === "PENDING" && (
-                      <Tooltip title="Revoke invitation">
-                        <IconButton
-                          aria-label="Revoke invitation"
+                      <Stack direction="row" alignItems="center">
+                        <Button
                           size="small"
-                          color="error"
-                          disabled={revoking === inv.token}
-                          onClick={() => void revokeInvitation(inv.token)}
+                          onClick={() => {
+                            void navigator.clipboard
+                              .writeText(`${window.location.origin}/admin/invite/${inv.token}`)
+                              .then(() => {
+                                setEmailFailed(false);
+                                setSendSuccess("Invitation link copied.");
+                              })
+                              .catch(() => setRevokeError("Could not copy the invitation link. Please retry."));
+                          }}
                         >
-                          {revoking === inv.token ? (
-                            <CircularProgress size={16} />
-                          ) : (
-                            <Block fontSize="small" />
-                          )}
-                        </IconButton>
-                      </Tooltip>
+                          Copy link
+                        </Button>
+                        <Tooltip title="Revoke invitation">
+                          <IconButton
+                            aria-label="Revoke invitation"
+                            size="small"
+                            color="error"
+                            disabled={revoking === inv.token}
+                            onClick={() => void revokeInvitation(inv.token)}
+                          >
+                            {revoking === inv.token ? (
+                              <CircularProgress size={16} />
+                            ) : (
+                              <Block fontSize="small" />
+                            )}
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
                     )}
                   </TableCell>
                 )}
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+        </Table></Box>
       )}
     </Box>
   );

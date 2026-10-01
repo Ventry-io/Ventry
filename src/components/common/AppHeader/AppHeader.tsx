@@ -112,6 +112,7 @@ export default function AppHeader() {
             position="fixed"
             elevation={1}
             sx={{
+                zIndex: theme => theme.zIndex.drawer + 1,
                 top: 0,
                 left: 0,
                 right: 0,
@@ -145,12 +146,12 @@ export default function AppHeader() {
                     </Link>
 
                     {user?.isAdmin && (
-                        <Link href={isInAdminArea ? "/" : "/admin"} style={{ textDecoration: "none" }}>
+                        <Link href={isInAdminArea ? "/" : "/admin"} aria-label={isInAdminArea ? "Leave admin area" : "Admin"} style={{ textDecoration: "none" }}>
                             <Typography
                                 variant="h6"
                                 sx={{ color: "#f50057", fontWeight: "bold", "&:hover": { opacity: 0.8 }, transition: "opacity 0.2s", boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)" }}
                             >
-                                {isInAdminArea ? "← Leave admin area" : "Admin"}
+                                {isInAdminArea ? <><Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>← Leave admin area</Box><Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>Site</Box></> : "Admin"}
                             </Typography>
                         </Link>
                     )}

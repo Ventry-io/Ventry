@@ -144,6 +144,7 @@ describe("badge templates", () => {
           fit: "cover",
           positionX: 25,
           positionY: 75,
+          fallbackPhotoUrls: [],
         },
       },
       [attendee],

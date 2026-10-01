@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
   Alert,
   Box,
@@ -31,11 +31,13 @@ interface InviteDetails {
   inviterName: string | null;
   permissions: OrgPermission[];
   expiresAt: string;
+  accessLevel: "READ" | "WRITE";
+  department: string | null;
+  role: string | null;
 }
 
 export default function InvitePage() {
   const params = useParams<{ token: string }>();
-  const router = useRouter();
   const token = params.token;
 
   const [loading, setLoading] = useState(true);
@@ -45,21 +47,19 @@ export default function InvitePage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [done, setDone] = useState<"accepted" | "declined" | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/admin/invite/${token}`);
+  const load = useCallback(() => {
+    return fetch(`/api/admin/invite/${token}`).then(async (res) => {
       const body = (await res.json()) as { invitation?: InviteDetails; error?: string };
       if (!res.ok) {
         setFetchError(body.error ?? "Failed to load invitation");
       } else {
         setInvite(body.invitation!);
       }
-    } catch {
+    }).catch(() => {
       setFetchError("Failed to load invitation");
-    } finally {
+    }).finally(() => {
       setLoading(false);
-    }
+    });
   }, [token]);
 
   useEffect(() => {
@@ -81,7 +81,7 @@ export default function InvitePage() {
         return;
       }
       setDone("accepted");
-      setTimeout(() => router.push("/admin/organization"), 2000);
+      setTimeout(() => window.location.assign(`/admin/organization?orgFilter=${encodeURIComponent(invite.organizationId)}`), 2000);
     } catch {
       setActionError("Failed to accept invitation");
     } finally {
@@ -204,13 +204,14 @@ export default function InvitePage() {
             </Typography>
           </Box>
 
+          <Box><Typography fontWeight={600}>Crew assignment</Typography><Typography>{invite.department || "Unassigned department"} · {invite.role || "No role assigned"}</Typography><Chip label={invite.accessLevel === "READ" ? "Read only" : "Read and write"} size="small" sx={{ mt: 1 }} /></Box>
           <Box>
             <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-              Permissions granted
+              Additional permissions
             </Typography>
             {invite.permissions.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                No specific permissions (read-only access)
+                No additional permissions
               </Typography>
             ) : (
               <Stack direction="row" flexWrap="wrap" gap={0.5}>

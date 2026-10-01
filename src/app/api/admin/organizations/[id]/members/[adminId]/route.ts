@@ -4,9 +4,12 @@ import { prisma } from "@/lib/prisma/prisma";
 import { checkAdminAuth } from "@/lib/auth/admin";
 import { AdminOrgPermission } from "@/generated/prisma";
 
+import { crewAssignmentSchema } from "@/types/schemas/crew";
+
 const updateMemberSchema = z.object({
-  permissions: z.array(z.nativeEnum(AdminOrgPermission)),
-}).strict();
+  permissions: z.array(z.nativeEnum(AdminOrgPermission)).optional(),
+  ...crewAssignmentSchema.partial().shape,
+}).strict().refine(value => Object.keys(value).length > 0, "No changes supplied");
 
 export async function PATCH(
   req: NextRequest,
@@ -43,9 +46,13 @@ export async function PATCH(
   });
   if (!membership) return NextResponse.json({ error: "Member not found in organization" }, { status: 404 });
 
+  if (body.departmentId && !await prisma.crewDepartment.findFirst({ where: { id: body.departmentId, organizationId: orgId } })) {
+    return NextResponse.json({ error: "Department does not belong to this organization" }, { status: 400 });
+  }
+
   const updated = await prisma.adminOrganizationMembership.update({
     where: { adminId_organizationId: { adminId: targetAdminId, organizationId: orgId } },
-    data: { permissions: body.permissions },
+    data: body,
   });
 
   return NextResponse.json({ membership: updated });

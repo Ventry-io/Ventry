@@ -112,8 +112,8 @@ describe("GET /api/admin/registrations — event scoping", () => {
         mockedCheckAdminAuth.mockResolvedValue({ authorized: true, adminId: "admin-individual" });
         mockedAdminEventFilter.mockResolvedValue(INDIVIDUAL_FILTER);
         const mockRegs = [
-            { id: "reg-1", event: { id: 7, name: "My Event" } },
-            { id: "reg-2", event: { id: 7, name: "My Event" } },
+            { id: "reg-1", user: { id: "user-1" }, event: { id: 7, name: "My Event", ownerId: "admin-individual" } },
+            { id: "reg-2", user: { id: "user-2" }, event: { id: 7, name: "My Event", ownerId: "admin-individual" } },
         ];
         prismaMock.registration.findMany.mockResolvedValue(mockRegs);
 

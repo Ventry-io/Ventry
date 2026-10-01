@@ -35,7 +35,8 @@ export async function DELETE(
     return NextResponse.json({ error: "Only pending invitations can be revoked" }, { status: 409 });
   }
 
-  await prisma.adminInvitation.delete({ where: { id: invitation.id } });
+  const revoked = await prisma.adminInvitation.deleteMany({ where: { id: invitation.id, status: AdminInvitationStatus.PENDING } });
+  if (!revoked.count) return NextResponse.json({ error: "Invitation is no longer pending" }, { status: 409 });
 
   return NextResponse.json({ success: true });
 }

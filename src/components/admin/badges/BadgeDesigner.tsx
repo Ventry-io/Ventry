@@ -56,6 +56,7 @@ type PendingFallbackPhoto = {
 };
 
 type BadgeDesignerProps = {
+  canWrite?: boolean;
   eventId: number;
   eventName: string;
   initialTemplates: BadgeTemplate[];
@@ -71,6 +72,8 @@ const FIELD_OPTIONS: Array<{ value: BadgeFieldKey; label: string }> = [
   { value: "legalName", label: "Legal name" },
   { value: "ticketId", label: "Ticket number" },
   { value: "ticketTier", label: "Ticket tier" },
+  { value: "crewDepartment", label: "Crew department" },
+  { value: "crewRole", label: "Crew role" },
   { value: "eventName", label: "Event name" },
   { value: "qrCode", label: "QR code" },
   { value: "customField", label: "Custom field" },
@@ -155,6 +158,7 @@ function getErrorMessage(raw: unknown, fallback: string) {
 }
 
 export default function BadgeDesigner({
+  canWrite = true,
   eventId,
   eventName,
   initialTemplates,
@@ -542,6 +546,7 @@ export default function BadgeDesigner({
   return (
     <>
     <Stack spacing={3}>
+      {!canWrite ? <Alert severity="info">Read-only access. Preview and export badges; contact the organization owner to save templates.</Alert> : null}
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" spacing={2}>
         <Box>
           <Typography variant="h4" fontWeight={700}>Badge Designer</Typography>
@@ -550,8 +555,8 @@ export default function BadgeDesigner({
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           <Button variant="outlined" startIcon={<Add />} onClick={addTemplate}>New</Button>
           <Button variant="outlined" startIcon={<ContentCopy />} onClick={duplicateTemplate}>Duplicate</Button>
-          <Button variant="outlined" color="error" startIcon={<Delete />} onClick={() => void deleteTemplate()} disabled={saving}>Delete</Button>
-          <Button variant="contained" startIcon={saving ? <CircularProgress color="inherit" size={18} /> : <Save />} onClick={() => void saveTemplate()} disabled={saving}>Save</Button>
+          <Button variant="outlined" color="error" startIcon={<Delete />} onClick={() => void deleteTemplate()} disabled={saving || !canWrite}>Delete</Button>
+          <Button variant="contained" startIcon={saving ? <CircularProgress color="inherit" size={18} /> : <Save />} onClick={() => void saveTemplate()} disabled={saving || !canWrite}>Save</Button>
         </Stack>
       </Stack>
 
@@ -614,7 +619,7 @@ export default function BadgeDesigner({
                 <MenuItem value="stretch">Stretch</MenuItem>
               </TextField>
               <input ref={fileInputRef} hidden type="file" accept="image/*" onChange={event => void handleBackgroundUpload(event)} />
-              <Button variant="outlined" startIcon={uploading ? <CircularProgress size={18} /> : <ImageIcon />} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              <Button variant="outlined" startIcon={uploading ? <CircularProgress size={18} /> : <ImageIcon />} onClick={() => fileInputRef.current?.click()} disabled={uploading || !canWrite}>
                 Upload background
               </Button>
               {draft.background.imageUrl ? (
@@ -655,7 +660,7 @@ export default function BadgeDesigner({
                   variant="outlined"
                   startIcon={uploadingFallbackPhoto ? <CircularProgress size={18} /> : <ImageIcon />}
                   onClick={() => fallbackPhotoInputRef.current?.click()}
-                  disabled={uploadingFallbackPhoto || (draft.background.fallbackPhotoUrls || []).length >= 30}
+                  disabled={!canWrite || uploadingFallbackPhoto || (draft.background.fallbackPhotoUrls || []).length >= 30}
                 >
                   Upload fallback photos
                 </Button>

@@ -115,6 +115,8 @@ model AdminOrganization {
   members     AdminOrganizationMembership[]
   events      Event[]                       @relation("OrgEvents")
   invitations AdminInvitation[]
+  departments CrewDepartment[]
+  crewResources Json @default("[]")
 }
 
 model AdminOrganizationMembership {
@@ -122,6 +124,10 @@ model AdminOrganizationMembership {
   adminId        String
   organizationId String
   permissions    AdminOrgPermission[]
+  accessLevel    CrewAccessLevel @default(WRITE)
+  departmentId   String?
+  role           String?
+  department     CrewDepartment? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   joinedAt       DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   admin          Admin                @relation(fields: [adminId], references: [id], onDelete: Cascade)
@@ -138,6 +144,10 @@ model AdminInvitation {
   invitedAdminId   String?
   invitedByAdminId String
   permissions      AdminOrgPermission[]
+  accessLevel      CrewAccessLevel @default(WRITE)
+  departmentId     String?
+  role             String?
+  department       CrewDepartment? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   status           AdminInvitationStatus @default(PENDING)
   token            String                @unique @default(cuid())
   expiresAt        DateTime
@@ -647,4 +657,20 @@ model Notification {
   createdAt DateTime         @default(now())
 
   @@index([userId, read])
+}
+
+model CrewDepartment {
+  id String @id @default(cuid())
+  organizationId String
+  name String
+  planning String @default("")
+  organization AdminOrganization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members AdminOrganizationMembership[]
+  invitations AdminInvitation[]
+  @@unique([organizationId, name])
+}
+
+enum CrewAccessLevel {
+  READ
+  WRITE
 }

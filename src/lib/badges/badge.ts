@@ -11,6 +11,8 @@ export type BadgeAttendee = {
   email: string;
   photoUrl: string | null;
   ticketTier: string | null;
+  crewDepartment?: string | null;
+  crewRole?: string | null;
   eventName: string;
   customFieldData: Record<string, string | number | boolean | null>;
 };
@@ -132,6 +134,10 @@ export function getBadgeElementValue(element: BadgeElement, attendee: BadgeAtten
       return `#${attendee.ticketId}`;
     case "ticketTier":
       return attendee.ticketTier || "Ticket";
+    case "crewDepartment":
+      return attendee.crewDepartment || "";
+    case "crewRole":
+      return attendee.crewRole || "";
     case "eventName":
       return attendee.eventName;
     case "customField": {

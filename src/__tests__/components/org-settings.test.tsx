@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import OrgSettings from "@/components/admin/organization/OrgSettings";
 
 vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
@@ -60,6 +61,9 @@ const mockMembers = [
   {
     adminId: ADMIN_ID,
     permissions: [],
+    accessLevel: "WRITE",
+    departmentId: null,
+    role: null,
     joinedAt: "2026-01-01T00:00:00.000Z",
     admin: {
       id: ADMIN_ID,
@@ -69,6 +73,9 @@ const mockMembers = [
   {
     adminId: "admin-2",
     permissions: ["COMMUNITY", "SUPPORT_TICKETS"],
+    accessLevel: "WRITE",
+    departmentId: null,
+    role: null,
     joinedAt: "2026-01-15T00:00:00.000Z",
     admin: {
       id: "admin-2",
@@ -91,6 +98,7 @@ const mockInvitations = [
 
 function orgHandlers(org = mockOrg) {
   return [
+    { url: `/api/admin/organizations/${ORG_ID}/crew`, response: { departments: [], crewResources: [], canWrite: true } },
     { url: "/api/admin/profile", response: mockProfile },
     { url: "/api/admin/organizations", response: { organizations: [org] } },
     { url: `/api/admin/organizations/${ORG_ID}/members`, response: { members: mockMembers } },
@@ -162,11 +170,10 @@ describe("OrgSettings — no org", () => {
   });
 
   it("submits POST /api/admin/organizations on create", async () => {
-    const mock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mockProfile), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ organizations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValue(new Response(JSON.stringify({ organization: mockOrg }), { status: 201, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", mock);
+    const mock = setupFetch([
+      ...noOrgHandlers(),
+      { url: "/api/admin/organizations", method: "POST", response: { organization: mockOrg }, status: 201 },
+    ]);
 
     render(<OrgSettings />);
     await waitFor(() => screen.getByText("Create your organization"));
@@ -182,7 +189,7 @@ describe("OrgSettings — no org", () => {
 
     await waitFor(() => {
       const postCall = mock.mock.calls.find(
-        ([url, opts]: [string, RequestInit]) =>
+        ([url, opts]) =>
           (url as string).includes("/api/admin/organizations") &&
           (opts as RequestInit)?.method === "POST",
       );
@@ -197,11 +204,10 @@ describe("OrgSettings — no org", () => {
   });
 
   it("shows server error on 409", async () => {
-    const mock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mockProfile), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ organizations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Organization slug already taken" }), { status: 409, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", mock);
+    setupFetch([
+      ...noOrgHandlers(),
+      { url: "/api/admin/organizations", method: "POST", response: { error: "Organization slug already taken" }, status: 409 },
+    ]);
 
     render(<OrgSettings />);
     await waitFor(() => screen.getByText("Create your organization"));
@@ -230,7 +236,7 @@ describe("OrgSettings — org dashboard", () => {
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
 
-    expect(screen.getAllByText(/ventry\.io\/org\/test-org/).length).toBeGreaterThan(0);
+    expect(screen.getByText((text) => text.includes(`${window.location.origin}/org/test-org`))).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /details/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /members/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /invitations/i })).toBeInTheDocument();
@@ -240,8 +246,9 @@ describe("OrgSettings — org dashboard", () => {
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
 
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
     expect(screen.getByText("A test org")).toBeInTheDocument();
-    expect(screen.getAllByText(/ventry\.io\/org\/test-org/).length).toBeGreaterThan(0);
+    expect(screen.getByText(`${window.location.origin}/org/test-org`)).toBeInTheDocument();
   });
 });
 
@@ -252,6 +259,7 @@ describe("OrgDetailsTab — owner", () => {
     setupFetch(orgHandlers());
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
 
     expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
   });
@@ -268,6 +276,7 @@ describe("OrgDetailsTab — owner", () => {
 
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
 
     fireEvent.click(screen.getByRole("button", { name: /edit/i }));
 
@@ -279,7 +288,7 @@ describe("OrgDetailsTab — owner", () => {
 
     await waitFor(() => {
       const patchCall = mock.mock.calls.find(
-        ([url, opts]: [string, RequestInit]) =>
+        ([url, opts]) =>
           (url as string).includes(`/api/admin/organizations/${ORG_ID}`) &&
           (opts as RequestInit)?.method === "PATCH",
       );
@@ -291,6 +300,7 @@ describe("OrgDetailsTab — owner", () => {
     setupFetch(orgHandlers());
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
 
     fireEvent.click(screen.getByRole("button", { name: /edit/i }));
     await waitFor(() => screen.getByDisplayValue("Test Org"));
@@ -310,6 +320,7 @@ describe("OrgDetailsTab — owner", () => {
     setupFetch(orgHandlers(mockOrgWithEvents));
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
 
     expect(screen.getByRole("button", { name: /delete organization/i })).toBeDisabled();
     expect(screen.getByText(/cannot delete/i)).toBeInTheDocument();
@@ -319,6 +330,7 @@ describe("OrgDetailsTab — owner", () => {
     setupFetch(orgHandlers());
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
 
     const deleteBtn = screen.getByRole("button", { name: /delete organization/i });
     expect(deleteBtn).not.toBeDisabled();
@@ -330,15 +342,14 @@ describe("OrgDetailsTab — owner", () => {
   });
 
   it("confirm delete calls DELETE endpoint", async () => {
-    const mock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mockProfile), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ organizations: [mockOrg] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValue(new Response(JSON.stringify(mockProfile), { status: 200, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", mock);
+    const mock = setupFetch([
+      ...orgHandlers(),
+      { url: `/api/admin/organizations/${ORG_ID}/invitations`, method: "POST", response: { invitation: { id: "inv-new" } }, status: 201 },
+    ]);
 
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
 
     fireEvent.click(screen.getByRole("button", { name: /delete organization/i }));
     await waitFor(() => screen.getByText(/permanently delete/i));
@@ -347,7 +358,7 @@ describe("OrgDetailsTab — owner", () => {
 
     await waitFor(() => {
       const deleteCall = mock.mock.calls.find(
-        ([url, opts]: [string, RequestInit]) =>
+        ([url, opts]) =>
           (url as string).includes(`/api/admin/organizations/${ORG_ID}`) &&
           (opts as RequestInit)?.method === "DELETE",
       );
@@ -368,6 +379,7 @@ describe("OrgDetailsTab — non-owner", () => {
 
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
 
     expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
     expect(
@@ -392,7 +404,7 @@ describe("OrgMembersTab", () => {
     expect(screen.getByText("Owner User")).toBeInTheDocument();
     expect(screen.getByText("Member User")).toBeInTheDocument();
     expect(screen.getByText("member@example.com")).toBeInTheDocument();
-    expect(screen.getByText("Owner")).toBeInTheDocument();
+    expect(screen.getAllByText("Owner")[0]).toBeInTheDocument();
   });
 
   it("shows permission chips for non-owner members", async () => {
@@ -446,7 +458,7 @@ describe("OrgMembersTab", () => {
 
     await waitFor(() => {
       const patchCall = mock.mock.calls.find(
-        ([url, opts]: [string, RequestInit]) =>
+        ([url, opts]) =>
           (url as string).includes("/members/admin-2") &&
           (opts as RequestInit)?.method === "PATCH",
       );
@@ -475,10 +487,11 @@ describe("OrgMembersTab", () => {
     await waitFor(() => screen.getByText("Member User"));
 
     fireEvent.click(screen.getByRole("button", { name: /remove member/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^remove$/i }));
 
     await waitFor(() => {
       const deleteCall = mock.mock.calls.find(
-        ([url, opts]: [string, RequestInit]) =>
+        ([url, opts]) =>
           (url as string).includes("/members/admin-2") &&
           (opts as RequestInit)?.method === "DELETE",
       );
@@ -543,13 +556,10 @@ describe("OrgInvitationsTab — owner", () => {
   });
 
   it("send invitation calls POST with email and selected permissions", async () => {
-    const mock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mockProfile), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ organizations: [mockOrg] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ invitations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ invitation: { id: "inv-new" } }), { status: 201, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValue(new Response(JSON.stringify({ invitations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", mock);
+    const mock = setupFetch([
+      ...orgHandlers(),
+      { url: `/api/admin/organizations/${ORG_ID}/invitations`, method: "POST", response: { invitation: { id: "inv-new" } }, status: 201 },
+    ]);
 
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
@@ -566,7 +576,7 @@ describe("OrgInvitationsTab — owner", () => {
 
     await waitFor(() => {
       const postCall = mock.mock.calls.find(
-        ([url, opts]: [string, RequestInit]) =>
+        ([url, opts]) =>
           (url as string).includes(`/api/admin/organizations/${ORG_ID}/invitations`) &&
           (opts as RequestInit)?.method === "POST",
       );
@@ -583,13 +593,10 @@ describe("OrgInvitationsTab — owner", () => {
   });
 
   it("shows success message after sending", async () => {
-    const mock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mockProfile), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ organizations: [mockOrg] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ invitations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ invitation: {} }), { status: 201, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValue(new Response(JSON.stringify({ invitations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", mock);
+    setupFetch([
+      ...orgHandlers(),
+      { url: `/api/admin/organizations/${ORG_ID}/invitations`, method: "POST", response: { invitation: { id: "inv-new" } }, status: 201 },
+    ]);
 
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));
@@ -607,12 +614,10 @@ describe("OrgInvitationsTab — owner", () => {
   });
 
   it("shows server error when invitation fails", async () => {
-    const mock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify(mockProfile), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ organizations: [mockOrg] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ invitations: [] }), { status: 200, headers: { "Content-Type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "User is already a member of this organization" }), { status: 409, headers: { "Content-Type": "application/json" } }));
-    vi.stubGlobal("fetch", mock);
+    setupFetch([
+      ...orgHandlers(),
+      { url: `/api/admin/organizations/${ORG_ID}/invitations`, method: "POST", response: { error: "User is already a member of this organization" }, status: 409 },
+    ]);
 
     render(<OrgSettings />);
     await waitFor(() => screen.getAllByText("Test Org"));

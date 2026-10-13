@@ -64,7 +64,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Invalid event id" }, { status: 400 });
     }
 
-    const authResult = await checkEventAdminAuth(eventId, req.headers, "SUPPORT_TICKETS");
+    const authResult = await checkEventAdminAuth(eventId, req.headers, "SUPPORT_TICKETS", true);
     if (!authResult.authorized) {
       if (authResult.error === "Event not found") {
         return NextResponse.json({ error: authResult.error }, { status: 404 });

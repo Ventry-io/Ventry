@@ -23,7 +23,7 @@ async function OrganizationPageContent() {
   return (
     <Box>
       <Typography variant="h4" fontWeight={700} gutterBottom>
-        Organization
+        Organization & crew
       </Typography>
       <OrgSettings />
     </Box>

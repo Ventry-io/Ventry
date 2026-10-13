@@ -15,7 +15,7 @@
     "dev:ventry": "BETTER_AUTH_URL=https://ventry.localhost:3443 NEXTAUTH_URL=https://ventry.localhost:3443 DEV_URL=https://ventry.localhost:3443 next dev -H ventry.localhost -p 3443 --experimental-https --experimental-https-key=certs/dev-local-key.pem --experimental-https-cert=certs/dev-local.pem",
     "dev:wait": "wait-on tcp:127.0.0.1:5433 && npm run dev:ventry",
     "dev:db": "docker compose -f .docker/docker-compose.local.yml up --quiet-pull >/dev/null 2>&1",
-    "build": "next build",
+    "build": "next build --webpack",
     "build:docker": "next build --webpack",
     "start": "next start",
     "lint": "eslint .",

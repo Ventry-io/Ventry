@@ -60,7 +60,6 @@ vi.mock('@/lib/prisma/prisma', () => {
   };
   
   // Self-reference for transaction callback
-  // @ts-expect-error
   prismaMock.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => await callback(prismaMock));
 
   return { prisma: prismaMock };

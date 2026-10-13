@@ -106,6 +106,7 @@ export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQu
       event: {
         select: {
           name: true,
+          organizationId: true,
         },
       },
       user: {
@@ -115,6 +116,8 @@ export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQu
           email: true,
           legalName: true,
           image: true,
+          isAdmin: true,
+          adminProfile: { select: { organizationMemberships: { select: { organizationId: true, role: true, department: { select: { name: true } } } } } },
           profilePictures: {
             orderBy: [
               { isPrimary: "desc" },
@@ -151,7 +154,10 @@ export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQu
     const profilePictures = await refreshSignedUrls(registration.user.profilePictures);
     const primaryPicture = profilePictures.find(picture => picture.isPrimary) || profilePictures[0];
 
+    const crew = registration.user.isAdmin ? registration.user.adminProfile?.organizationMemberships.find(m => m.organizationId === registration.event.organizationId) : null;
     return {
+      crewDepartment: crew?.department?.name || null,
+      crewRole: crew?.role || null,
       id: registration.id,
       registrationId: registration.id,
       ticketId: registration.ticketId,

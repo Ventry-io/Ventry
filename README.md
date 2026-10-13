@@ -30,6 +30,8 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Docker Deployment
 
+Production builds use Webpack to avoid a Turbopack prerender error on OAuth callback routes. Recheck Turbopack when upgrading Next.js.
+
 This repository ships a branch-based Docker deployment workflow:
 
 - `dev` builds and pushes `harbor.m-loeffler.de/ventry:dev`, then updates `/docker/ventry/docker-compose.dev.yml`

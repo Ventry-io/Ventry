@@ -6,6 +6,8 @@ export const BADGE_FIELD_KEYS = [
   "legalName",
   "ticketId",
   "ticketTier",
+  "crewDepartment",
+  "crewRole",
   "eventName",
   "qrCode",
   "customField",

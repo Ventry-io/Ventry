@@ -97,6 +97,15 @@ export async function PATCH(
         });
         if (!accessible) return forbiddenResponse("No access to this registration");
 
+        const writeAuth = await checkEventAdminAuth(current.eventId, undefined, req.headers, true);
+        if (!writeAuth.authorized) return forbiddenResponse(writeAuth.error);
+
+        if ((paymentStatus !== undefined && paymentStatus !== current.payments[0]?.paymentStatus) ||
+            (paymentAmount !== undefined && Number(paymentAmount) !== Number(current.payments[0]?.amount))) {
+          const financeAuth = await checkEventAdminAuth(current.eventId, "STRIPE_FINANCES", req.headers, true);
+          if (!financeAuth.authorized) return forbiddenResponse(financeAuth.error);
+        }
+
         // Org-member access to approval status changes requires EVENT_APPROVAL permission
         if (status === "APPROVED") {
           const approvalAuth = await checkEventAdminAuth(current.eventId, "EVENT_APPROVAL", req.headers);

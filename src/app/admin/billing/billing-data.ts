@@ -1,9 +1,10 @@
-import { adminEventFilter } from "@/lib/auth/admin";
+import { getAdminFinanceAccess } from "@/lib/auth/admin";
 import { prisma } from "@/lib/prisma/prisma";
 import { estimatePlatformFees } from "@/lib/billing/platformFee";
 
 export async function getBillingData(adminId: string, orgScope?: string) {
-    const eventFilter = await adminEventFilter(adminId, orgScope);
+    const { eventFilter, hasRestrictedOrganizations } = await getAdminFinanceAccess(adminId, orgScope);
+    if (!eventFilter) return null;
     const paymentEventFilter = { registration: { event: eventFilter } };
 
     const [byStatus, recentPayments, revenueByEvent, completedForFeeEstimate] = await Promise.all([
@@ -63,6 +64,7 @@ export async function getBillingData(adminId: string, orgScope?: string) {
     const netRevenue = completed.sum - stripeFees - platformFees;
 
     return {
+        hasRestrictedOrganizations,
         completed,
         pending,
         failed,

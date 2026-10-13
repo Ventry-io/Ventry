@@ -83,5 +83,5 @@ async function EditEventPageContent({
     schedule: (event.schedule as unknown as SerializedEvent["schedule"]) || [],
   };
 
-  return <EditEventClient event={serializedEvent} />;
+  return <EditEventClient event={serializedEvent} canWrite={authResult.canWrite} />;
 }

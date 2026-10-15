@@ -14,6 +14,20 @@ function getSupabaseClient() {
     return supabaseClient;
 }
 
+export async function healthCheck() {
+    const buckets = new Set([getBucketName("profile"), getBucketName("banners")]);
+    await Promise.all([...buckets].map(async (bucket) => {
+        if (!bucket) {
+            throw Object.assign(new Error("Supabase storage bucket not configured"), {
+                code: "MISSING_BUCKET_ID",
+            });
+        }
+        const { error } = await getSupabaseClient().storage.getBucket(bucket);
+        if (error) throw error;
+    }));
+    return true;
+}
+
 function getBucketName(bucket: StorageBucket = "profile") {
     if (bucket === "banners") {
         return process.env.SUPABASE_BANNERS_BUCKET_ID || "banners";

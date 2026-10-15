@@ -4,13 +4,7 @@ import { GiphyFetch } from "@giphy/js-fetch-api";
 import { healthCheck as supabaseHealthCheck } from "@/lib/supabase";
 import { mailTransport } from "@/lib/mail";
 import { connection } from "next/server";
-
-type CheckResult = {
-  success: boolean;
-  durationMs: number;
-  error?: string;
-  code?: string;
-};
+import { getGiphyHealth, recordGiphyHealth, type HealthCheckResult as CheckResult } from "@/lib/giphy-health";
 
 const CHECK_TIMEOUT_MS = 10_000;
 const configuredCacheTtlMs = Number(process.env.CACHE_TTL_MS);
@@ -25,9 +19,11 @@ let cacheExpiresAt = 0;
 export async function GET() {
   await connection();
   const health = await getHealth();
+  const fuses = { ...health.fuses, giphy: getGiphyHealth() ?? health.fuses.giphy };
+  const status = Object.values(fuses).every((check) => check.success) ? "ok" : "error";
 
-  return Response.json(health, {
-    status: health.status === "ok" ? 200 : 500,
+  return Response.json({ ...health, status, fuses }, {
+    status: status === "ok" ? 200 : 500,
     headers: { "Cache-Control": "no-store" },
   });
 }
@@ -60,10 +56,17 @@ async function checkHealth() {
 
   const fuses = Object.fromEntries(
     await Promise.all(
-      Object.entries(checks).map(async ([name, check]) => [
-        name,
-        await runCheck(name, check),
-      ] as const),
+      Object.entries(checks).map(async ([name, check]) => {
+        const cachedGiphy = name === "giphy" ? getGiphyHealth() : undefined;
+        if (cachedGiphy) {
+          return [name, cachedGiphy] as const;
+        }
+        const result = await runCheck(name, check);
+        if (name === "giphy") {
+          recordGiphyHealth(result);
+        }
+        return [name, result] as const;
+      }),
     ),
   );
   const success = Object.values(fuses).every((check) => check.success);

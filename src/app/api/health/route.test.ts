@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+const getSession = vi.hoisted(() => vi.fn());
+const giphySearch = vi.hoisted(() => vi.fn());
 
 const checks = vi.hoisted(() => ({
   prisma: vi.fn(),
@@ -11,9 +15,13 @@ const checks = vi.hoisted(() => ({
 vi.mock("@/lib/prisma/prisma", () => ({ prisma: { $queryRaw: checks.prisma } }));
 vi.mock("@/lib/stripe", () => ({ stripe: { accounts: { retrieve: checks.stripe } } }));
 vi.mock("@/lib/mail", () => ({ mailTransport: { verify: checks.mail } }));
-vi.mock("next/server", () => ({ connection: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/lib/auth/session", () => ({ getSession }));
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
+  connection: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@giphy/js-fetch-api", () => ({
-  GiphyFetch: vi.fn(function () { return { trending: checks.giphy }; }),
+  GiphyFetch: vi.fn(function () { return { trending: checks.giphy, search: giphySearch }; }),
 }));
 vi.mock("@supabase/supabase-js", () => ({
   createClient: () => ({
@@ -22,25 +30,32 @@ vi.mock("@supabase/supabase-js", () => ({
 }));
 
 let GET: typeof import("./route").GET;
+let searchGiphy: typeof import("../community/giphy/search/route").GET;
 
 describe("GET /api/health", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance", "Date"] });
     vi.stubEnv("GIPHY_API_KEY", "test-key");
+    vi.stubEnv("GIPHY_CACHE_TTL_MS", "300000");
+    vi.stubGlobal("ventryGiphyHealth", undefined);
     vi.stubEnv("CACHE_TTL_MS", "60000");
     vi.stubEnv("SUPABASE_BUCKET_ID", "profile-test");
     vi.stubEnv("SUPABASE_BANNERS_BUCKET_ID", "");
     vi.spyOn(console, "error").mockImplementation(() => {});
     Object.values(checks).forEach((check) => check.mockReset().mockResolvedValue(true));
     checks.supabase.mockResolvedValue({ error: null });
+    getSession.mockReset().mockResolvedValue({ user: { id: "user-1" } });
+    giphySearch.mockReset().mockResolvedValue({ data: [{ id: "gif-1" }] });
     ({ GET } = await import("./route"));
+    ({ GET: searchGiphy } = await import("../community/giphy/search/route"));
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("runs checks concurrently and reports each duration plus total duration", async () => {
@@ -249,5 +264,152 @@ describe("GET /api/health", () => {
     await vi.advanceTimersByTimeAsync(1);
     await GET();
     expect(checks.prisma).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks Giphy only every five minutes while other checks keep refreshing", async () => {
+    await GET();
+    for (let minute = 1; minute < 5; minute++) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect((await GET()).status).toBe(200);
+    }
+    expect(checks.giphy).toHaveBeenCalledOnce();
+    expect(checks.mail).toHaveBeenCalledTimes(5);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect((await GET()).status).toBe(200);
+    expect(checks.giphy).toHaveBeenCalledTimes(2);
+    expect(checks.mail).toHaveBeenCalledTimes(6);
+  });
+
+  it("caches Giphy failures for five minutes before checking for recovery", async () => {
+    checks.giphy.mockRejectedValue(new Error("Rate limited"));
+    expect((await GET()).status).toBe(500);
+    checks.giphy.mockResolvedValue(true);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect((await GET()).status).toBe(500);
+    expect(checks.giphy).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(240_000);
+    expect((await GET()).status).toBe(200);
+    expect(checks.giphy).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves the original Giphy duration when reusing its result", async () => {
+    checks.giphy.mockImplementationOnce(() => new Promise((resolve) => setTimeout(resolve, 25)));
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(25);
+    const original = await (await pending).json();
+    expect(original.fuses.giphy).toEqual({ success: true, durationMs: 25 });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    const refreshed = await (await GET()).json();
+    expect(refreshed.fuses.giphy).toEqual(original.fuses.giphy);
+    expect(checks.giphy).toHaveBeenCalledOnce();
+  });
+
+  it("caches Giphy timeouts instead of retrying on every health refresh", async () => {
+    checks.giphy.mockReturnValue(new Promise(() => {}));
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(10_000);
+    const original = await (await pending).json();
+    expect(original.fuses.giphy).toMatchObject({ success: false, code: "HEALTH_CHECK_TIMEOUT" });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    const refreshed = await (await GET()).json();
+    expect(refreshed.fuses.giphy).toEqual(original.fuses.giphy);
+    expect(checks.giphy).toHaveBeenCalledOnce();
+  });
+
+  it("uses actual search results instead of issuing a dedicated Giphy health request", async () => {
+    const response = await searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search?q=cats"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ gifs: [{ id: "gif-1" }] });
+
+    // Separate route bundles can load separate copies of the shared module.
+    vi.resetModules();
+    ({ GET } = await import("./route"));
+    const health = await GET();
+    expect(health.status).toBe(200);
+    expect((await health.json()).fuses.giphy).toEqual({ success: true, durationMs: 0 });
+    expect(checks.giphy).not.toHaveBeenCalled();
+    expect(giphySearch).toHaveBeenCalledExactlyOnceWith("cats", { limit: 20, rating: "g" });
+  });
+
+  it("immediately reports search failures and recovery without rerunning other cached checks", async () => {
+    expect((await GET()).status).toBe(200);
+    const error = Object.assign(new Error("Sensitive provider details"), { code: "RATE_LIMITED" });
+    giphySearch.mockImplementationOnce(() => new Promise((_, reject) => setTimeout(() => reject(error), 25)));
+    const pending = searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search?q=cats"));
+    await vi.advanceTimersByTimeAsync(25);
+    expect((await pending).status).toBe(502);
+
+    const unhealthy = await GET();
+    expect(unhealthy.status).toBe(500);
+    const body = await unhealthy.json();
+    expect(body.status).toBe("error");
+    expect(body.fuses.giphy).toEqual({
+      success: false, durationMs: 25, error: "Health check giphy failed", code: "RATE_LIMITED",
+    });
+    expect(JSON.stringify(body)).not.toContain("Sensitive provider details");
+
+    expect((await searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search?q=dogs"))).status).toBe(200);
+    const recovered = await GET();
+    expect(recovered.status).toBe(200);
+    expect((await recovered.json()).fuses.giphy).toEqual({ success: true, durationMs: 0 });
+    expect(checks.prisma).toHaveBeenCalledOnce();
+    expect(checks.mail).toHaveBeenCalledOnce();
+    expect(checks.giphy).toHaveBeenCalledOnce();
+  });
+
+  it("records trending requests as Giphy health observations", async () => {
+    checks.giphy.mockResolvedValue({ data: [] });
+    expect((await searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search"))).status).toBe(200);
+    expect((await GET()).status).toBe(200);
+    expect(checks.giphy).toHaveBeenCalledExactlyOnceWith({ limit: 20, rating: "g" });
+  });
+
+  it("does not mark Giphy unhealthy for unauthenticated requests", async () => {
+    expect((await GET()).status).toBe(200);
+    getSession.mockResolvedValue(null);
+    expect((await searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search?q=cats"))).status).toBe(401);
+    expect((await GET()).status).toBe(200);
+    expect(giphySearch).not.toHaveBeenCalled();
+  });
+
+  it.each(["0", "-1", "invalid", "1.5"])("rejects invalid search limits without affecting Giphy health: %s", async (limit) => {
+    expect((await GET()).status).toBe(200);
+    const request = new NextRequest(`https://local.dev/api/community/giphy/search?q=cats&limit=${limit}`);
+    expect((await searchGiphy(request)).status).toBe(400);
+    expect((await GET()).status).toBe(200);
+    expect(giphySearch).not.toHaveBeenCalled();
+  });
+
+  it("records missing API keys even when the overall health result is cached", async () => {
+    expect((await GET()).status).toBe(200);
+    vi.stubEnv("GIPHY_API_KEY", "");
+    expect((await searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search?q=cats"))).status).toBe(503);
+    const health = await GET();
+    expect(health.status).toBe(500);
+    expect((await health.json()).fuses.giphy).toMatchObject({ success: false, code: "MISSING_API_KEY" });
+    expect(checks.prisma).toHaveBeenCalledOnce();
+  });
+
+  it("extends the configured 30-minute Giphy cache when actual searches run", async () => {
+    vi.stubEnv("GIPHY_CACHE_TTL_MS", "1800000");
+    vi.resetModules();
+    ({ GET } = await import("./route"));
+    ({ GET: searchGiphy } = await import("../community/giphy/search/route"));
+    await GET();
+    await vi.advanceTimersByTimeAsync(29 * 60_000);
+    await searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search?q=cats"));
+    await GET();
+
+    await vi.advanceTimersByTimeAsync(29 * 60_000);
+    await GET();
+    expect(checks.giphy).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await GET();
+    expect(checks.giphy).toHaveBeenCalledTimes(2);
   });
 });

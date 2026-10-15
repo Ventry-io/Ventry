@@ -19,6 +19,22 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Commit Messages
+
+Install the commit message hook once per clone:
+
+```bash
+npm run hooks:install
+```
+
+Use `<type>(optional-scope)!: description`, for example `feat(crew): add departments`.
+Allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`.
+Git-generated merge and revert messages are accepted.
+
+GitHub release automation rates `feat` as minor, `!` or `BREAKING CHANGE:` in the body as major,
+and other types as patch. It ignores `chore(release)` commits.
+Run `npm run test:hooks` to verify the hook.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

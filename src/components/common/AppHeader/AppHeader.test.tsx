@@ -91,7 +91,7 @@ describe("AppHeader health warning", () => {
   it.each([undefined, 0, -1, "3000", 1.5])("uses a safe fallback for an invalid server interval: %s", async (cacheTtlMs) => {
     fetchMock.mockResolvedValue(Response.json({ status: "ok", cacheTtlMs }));
     await act(async () => { render(<AppHeader />); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(29_999); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_999); });
     expect(fetchMock).toHaveBeenCalledOnce();
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(fetchMock).toHaveBeenCalledTimes(2);

@@ -33,3 +33,6 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Check Renovate issue workflow exemptions
+        run: node --test .github/scripts/renovate.node-test.mjs

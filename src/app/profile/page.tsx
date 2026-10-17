@@ -49,6 +49,7 @@ async function ProfilePageContent() {
       },
       accounts: {
         select: {
+          id: true,
           accountId: true,
           providerId: true,
           password: true // Check if password is set (in credential account)

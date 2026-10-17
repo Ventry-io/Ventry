@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma";
 
 vi.mock("@/lib/prisma/prisma", () => ({
   prisma: {
+    user: { findUnique: vi.fn() },
     event: {
       findUnique: vi.fn(),
     },
@@ -110,7 +111,8 @@ function transactionMock(registrationCreate: ReturnType<typeof vi.fn>) {
 describe("POST /api/event/[id]/attend", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedGetSession.mockResolvedValue({ user: { id: "user-1", legalName: "Jane Doe", addressLine1: "Main St 1", addressCity: "Berlin", addressPostalCode: "10115", addressCountry: "DE" } });
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1" } });
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({ legalName: "Jane Doe", addressLine1: "Main St 1", addressCity: "Berlin", addressPostalCode: "10115", addressCountry: "DE" } as never);
     mockedFindEvent.mockResolvedValue(eventFixture());
     mockedCountActiveRegistrations.mockResolvedValue(0);
     mockedReleaseExpiredPendingRegistrations.mockResolvedValue(undefined);
@@ -118,7 +120,7 @@ describe("POST /api/event/[id]/attend", () => {
   });
 
   it("rejects a missing billing address before reserving products, even with a check-in name", async () => {
-    mockedGetSession.mockResolvedValue({ user: { id: "user-1", legalName: "Jane Doe" } });
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({ legalName: "Jane Doe" } as never);
     const response = await POST(attendRequest({ productIds: ["ticket-basic"] }), { params: Promise.resolve({ id: "7" }) });
     expect(response.status).toBe(422);
     expect(mockedFindEvent).not.toHaveBeenCalled();
@@ -126,7 +128,7 @@ describe("POST /api/event/[id]/attend", () => {
   });
 
   it("requires check-in identity before reserving products", async () => {
-    mockedGetSession.mockResolvedValue({ user: { id: "user-1", legalName: " " } });
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({ legalName: " " } as never);
     const response = await POST(attendRequest({ productIds: ["ticket-basic"] }), { params: Promise.resolve({ id: "7" }) });
     expect(response.status).toBe(422);
     expect(mockedTransaction).not.toHaveBeenCalled();

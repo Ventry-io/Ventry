@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { prisma } from "@/lib/prisma/prisma";
 import { getSession } from "@/lib/auth/session";
 import { hasCheckInIdentity, hasBillingAddress } from "@/lib/user/profile-completion";
 
@@ -14,7 +15,13 @@ const middleware = async (req: NextRequest) => {
     if (!sessionToken) return NextResponse.next();
 
     const session = await getSession(req.headers);
-    if (!session?.user || (hasCheckInIdentity(session.user) && hasBillingAddress(session.user))) return NextResponse.next();
+    if (!session?.user) return NextResponse.next();
+    // Address fields use returned:false in Better Auth and are absent from sessions.
+    const identity = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { legalName: true, addressLine1: true, addressCity: true, addressPostalCode: true, addressCountry: true },
+    });
+    if (identity && hasCheckInIdentity(identity) && hasBillingAddress(identity)) return NextResponse.next();
 
     const url = new URL("/complete-profile", req.url);
     url.searchParams.set("intent", "billing");

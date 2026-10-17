@@ -137,9 +137,19 @@ describe("CompleteProfileWizard post-submit navigation", () => {
 
   it("resends confirmation with the original destination and prevents repeated clicks", async () => {
     render(<CheckEmail email="jane@example.com" callbackUrl="/events/42/register" />);
+    expect(screen.getByText("jane@example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start registration with another email" })).toHaveAttribute("href", "/register?callbackUrl=%2Fevents%2F42%2Fregister");
     fireEvent.click(screen.getByRole("button", { name: "Resend confirmation link" }));
     await screen.findByText("If this address needs verification, we've sent a new link.");
     expect(mocks.resend).toHaveBeenCalledWith({ email: "jane@example.com", callbackURL: "/events/42/register" });
     expect(screen.getByRole("button", { name: "Resend in 60s" })).toBeDisabled();
+  });
+
+  it("asks for an address when the confirmation page is opened without one", async () => {
+    render(<CheckEmail callbackUrl="/profile" />);
+    fireEvent.change(screen.getByLabelText(/Email address/), { target: { value: "jane@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Resend confirmation link" }));
+    await waitFor(() => expect(mocks.resend).toHaveBeenCalledWith({ email: "jane@example.com", callbackURL: "/profile" }));
   });
 });

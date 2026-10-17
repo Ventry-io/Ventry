@@ -104,6 +104,7 @@ interface User {
   addressCountry?: string | null;
   profilePictures: ProfilePicture[];
   accounts: Array<{
+    id: string;
     accountId: string;
     providerId: string;
     password?: string | null;

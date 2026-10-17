@@ -86,14 +86,14 @@ describe("POST /api/auth/complete-profile - username handling", () => {
     expect(destination.searchParams.get("callbackUrl")).toBe("/events/42/register?ticket=basic");
   });
   it("lets prepared users enter ticket selection directly", async () => {
-    mockedGetSession.mockResolvedValue({ user: { id: "user-1", legalName: "Jane Doe", addressLine1: "Main St 1", addressCity: "Berlin", addressPostalCode: "10115", addressCountry: "DE" } });
+    prismaMock.user.findUnique.mockResolvedValue({ legalName: "Jane Doe", addressLine1: "Main St 1", addressCity: "Berlin", addressPostalCode: "10115", addressCountry: "DE" });
     const res = await profileCompletion(new NextRequest("https://local.dev:3443/events/42/register", { headers: { cookie: "VENTRY.session_token=test" } }));
     expect(res.status).toBe(200);
     expect(res.headers.get("location")).toBeNull();
   });
 
   it("requests billing details even when the check-in name is already present", async () => {
-    mockedGetSession.mockResolvedValue({ user: { id: "user-1", legalName: "Jane Doe" } });
+    prismaMock.user.findUnique.mockResolvedValue({ legalName: "Jane Doe" });
     const res = await profileCompletion(new NextRequest("https://local.dev:3443/events/42/register", { headers: { cookie: "VENTRY.session_token=test" } }));
     expect(new URL(res.headers.get("location")!).searchParams.get("intent")).toBe("billing");
   });

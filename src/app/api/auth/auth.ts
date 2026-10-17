@@ -55,10 +55,11 @@ export const auth = betterAuth({
             if (ctx.path === "/unlink-account") {
                 const session = await getSessionFromCtx(ctx);
                 if (!session) return; // The endpoint's session middleware rejects unauthenticated requests.
-                if (ctx.body?.providerId === "credential" || ctx.body?.providerId === "credentials") {
+                const accounts = await ctx.context.internalAdapter.findAccounts(session.user.id);
+                const target = accounts.find(account => account.id === ctx.body?.accountId);
+                if (target?.providerId === "credential" || target?.providerId === "credentials") {
                     throw new APIError("BAD_REQUEST", { message: "Email sign-in is required and cannot be removed." });
                 }
-                const accounts = await ctx.context.internalAdapter.findAccounts(session.user.id);
                 if (!accounts.some(account => account.providerId === "credential" && account.password)) {
                     throw new APIError("BAD_REQUEST", { message: "Set an email password before removing linked accounts." });
                 }
@@ -206,7 +207,6 @@ export const auth = betterAuth({
         sendOnSignIn: false,
         expiresIn: 24 * 60 * 60, // 24 hours (correct property name)
 
-        fromEmail: process.env.SMTP_FROM || "<ventry@m-loeffler.de>",
         autoSignInAfterVerification: true,
 
         sendVerificationEmail: async ({ user, url }) => {
@@ -281,7 +281,6 @@ export const auth = betterAuth({
             mapProfileToUser(profile) {
                 const clamped = clampDisplayName(profile.name);
                 return {
-                    id: profile.sub,
                     name: clamped,
                     oauthLegalNameSuggestion: clamped,
                     email: profile.email,
@@ -298,7 +297,6 @@ export const auth = betterAuth({
             mapProfileToUser(profile) {
                 const clamped = clampDisplayName(profile.name || profile.login);
                 return {
-                    id: profile.id.toString(),
                     name: clamped,
                     // profile.login is a handle, not a legal name - only suggest
                     // one when GitHub actually gave us a "First Last" name.

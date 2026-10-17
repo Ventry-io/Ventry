@@ -119,7 +119,11 @@ export async function POST(
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        if (!hasCheckInIdentity(session.user) || !hasBillingAddress(session.user)) {
+        const identity = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { legalName: true, addressLine1: true, addressCity: true, addressPostalCode: true, addressCountry: true },
+        });
+        if (!identity || !hasCheckInIdentity(identity) || !hasBillingAddress(identity)) {
             return NextResponse.json({ error: "Add your legal name and billing address before booking a ticket." }, { status: 422 });
         }
 

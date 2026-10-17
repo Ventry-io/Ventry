@@ -26,7 +26,7 @@ export default function CheckEmail({ email: initialEmail = "", callbackUrl }: { 
     setSending(true);
     setError(null);
     try {
-      const result = await authClient.sendVerificationEmail({ email: email.trim(), callbackURL: callback });
+      const result = await authClient.sendVerificationEmail({ email: (initialEmail || email).trim(), callbackURL: callback });
       if (result.error) {
         setError("We could not send the link. Please try again in a moment.");
         setRemaining(60);
@@ -54,7 +54,14 @@ export default function CheckEmail({ email: initialEmail = "", callbackUrl }: { 
       {sent && <Alert severity="success">If this address needs verification, we&apos;ve sent a new link.</Alert>}
       {error && <Alert severity="error">{error}</Alert>}
       <Stack component="form" onSubmit={resend} spacing={2}>
-        <TextField label="Email address" type="email" autoComplete="email" required fullWidth value={email} onChange={(event) => { setEmail(event.target.value); setSent(false); }} />
+        {initialEmail ? (
+          <Box sx={{ textAlign: "center" }}>
+            <Typography variant="body2" color="text.secondary">Confirmation address</Typography>
+            <Typography fontWeight={600} sx={{ overflowWrap: "anywhere" }}>{initialEmail}</Typography>
+          </Box>
+        ) : (
+          <TextField label="Email address" type="email" autoComplete="email" required fullWidth value={email} onChange={(event) => { setEmail(event.target.value); setSent(false); }} />
+        )}
         <Button type="submit" variant="outlined" disabled={sending || remaining > 0}>
           {sending ? "Sending…" : remaining ? `Resend in ${remaining}s` : "Resend confirmation link"}
         </Button>
@@ -62,7 +69,7 @@ export default function CheckEmail({ email: initialEmail = "", callbackUrl }: { 
       <Stack spacing={1} textAlign="center">
         <Button href={`/login?callbackUrl=${encodeURIComponent(callback)}`}>Back to sign in</Button>
         <Typography variant="body2" color="text.secondary">Entered the wrong address?</Typography>
-        <Button href={`/register?callbackUrl=${encodeURIComponent(callback)}`}>Register with another email</Button>
+        <Button href={`/register?callbackUrl=${encodeURIComponent(callback)}`}>Start registration with another email</Button>
       </Stack>
     </Stack>
   );

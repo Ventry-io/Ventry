@@ -62,6 +62,10 @@ async function EventDetailPageContent({
 
   const { message } = await searchParams;
   const session = await getSession();
+  const bookingIdentity = session?.user ? await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { legalName: true, addressLine1: true, addressCity: true, addressPostalCode: true, addressCountry: true },
+  }) : null;
 
   const event = await prisma.event.findFirst({
     where: { 
@@ -433,7 +437,7 @@ async function EventDetailPageContent({
                   />
                 ) : (
                   <>
-                    {(!session?.user || !hasCheckInIdentity(session.user) || !hasBillingAddress(session.user)) && (
+                    {(!bookingIdentity || !hasCheckInIdentity(bookingIdentity) || !hasBillingAddress(bookingIdentity)) && (
                       <Alert severity="info" sx={{ mb: 2 }}>
                         Booking requires your legal name and billing address. Add them before ticket sales open to avoid delays. Preparing your details does not reserve a ticket.
                         <Button fullWidth size="small" sx={{ mt: 1 }} href={`/complete-profile?intent=billing&callbackUrl=${encodeURIComponent(`/events/${event.id}`)}`}>

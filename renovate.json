@@ -1,12 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    ":semanticCommits",
-    ":dependencyDashboard",
-    ":maintainLockFilesWeekly",
-    "schedule:earlyMondays"
-  ],
+  "extends": ["config:recommended", ":semanticCommits", ":dependencyDashboard"],
   "timezone": "Europe/Berlin",
   "rangeStrategy": "bump",
   "prHourlyLimit": 2,
@@ -19,19 +13,63 @@
     "dependencyDashboardApproval": false,
     "minimumReleaseAge": null,
     "prCreation": "immediate",
-    "labels": ["security"]
+    "labels": ["security", "dependencies"],
+    "automerge": false,
+    "vulnerabilityFixStrategy": "lowest",
+    "prConcurrentLimit": 0,
+    "semanticCommitType": "fix",
+    "prBodyNotes": [
+      "Security fix: review the advisory and CI results before merging. Major upgrades may be required."
+    ]
   },
   "packageRules": [
     {
       "description": "Wait a bit before adopting fresh npm releases",
       "matchDatasources": ["npm"],
-      "minimumReleaseAge": "3 days"
+      "minimumReleaseAge": "3 days",
+      "schedule": ["* * * * 1"]
     },
     {
-      "description": "Catch-all: group ungrouped npm minor/patch updates (specific groups below override this group name)",
+      "description": "Group remaining npm patch/minor updates; specific families below override this group",
       "groupName": "npm Dependencies",
       "matchManagers": ["npm"],
       "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "description": "Monthly major upgrades; allow PRs without dashboard approval by default",
+      "matchUpdateTypes": ["major"],
+      "groupName": null,
+      "schedule": ["* * 1-3 * *"],
+      "minimumReleaseAge": "7 days",
+      "prPriority": -2,
+      "addLabels": ["major"],
+      "prBodyNotes": ["Major update: inspect release notes and migration guides for breaking changes before merging."]
+    },
+    {
+      "description": "Group remaining npm runtime majors; specific families below take precedence",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["dependencies"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "npm Runtime Major Updates"
+    },
+    {
+      "description": "Group remaining npm development majors; specific families below take precedence",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "npm Development Major Updates"
+    },
+    {
+      "description": "Prioritize regular patches over minor and major updates",
+      "matchUpdateTypes": ["patch"],
+      "prPriority": 2,
+      "addLabels": ["patch"]
+    },
+    {
+      "description": "Regular minor updates remain separate from patches",
+      "matchUpdateTypes": ["minor"],
+      "prPriority": 1,
+      "addLabels": ["minor"]
     },
     {
       "description": "Keep Next.js, React, and matching types/config together",
@@ -50,24 +88,13 @@
       "description": "Prisma packages should be reviewed and tested together",
       "groupName": "Prisma Database",
       "matchManagers": ["npm"],
-      "matchPackageNames": [
-        "prisma",
-        "@prisma/client",
-        "@prisma/adapter-pg",
-        "@prisma/extension-accelerate"
-      ]
+      "matchPackageNames": ["prisma", "@prisma/client", "@prisma/adapter-*", "@prisma/extension-*"]
     },
     {
       "description": "Stripe SDK packages should be updated together",
       "groupName": "Stripe",
       "matchManagers": ["npm"],
-      "matchPackageNames": [
-        "stripe",
-        "@stripe/stripe-js",
-        "@stripe/react-stripe-js",
-        "@stripe/connect-js",
-        "@stripe/react-connect-js"
-      ]
+      "matchPackageNames": ["stripe", "@stripe/**"]
     },
     {
       "description": "Group better-auth packages",
@@ -108,7 +135,8 @@
         "jsdom",
         "next-test-api-route-handler",
         "@vitejs/plugin-react",
-        "@testing-library/**"
+        "@testing-library/**",
+        "@vitest/**"
       ]
     },
     {
@@ -120,7 +148,10 @@
         "typescript",
         "@biomejs/**",
         "@eslint/**",
-        "eslint-*"
+        "eslint-*",
+        "typescript-eslint",
+        "@typescript-eslint/**",
+        "!eslint-config-next"
       ]
     },
     {
@@ -142,7 +173,9 @@
       "description": "Group GitHub Actions updates",
       "groupName": "GitHub Actions",
       "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["minor", "patch"]
+      "schedule": ["* * * * 1"],
+      "prPriority": -3,
+      "addLabels": ["infrastructure"]
     },
     {
       "description": "Group Docker image updates",
@@ -151,12 +184,55 @@
         "dockerfile",
         "docker-compose"
       ],
-      "matchUpdateTypes": ["minor", "patch"]
+      "schedule": ["* * * * 1"],
+      "prPriority": -3,
+      "addLabels": ["infrastructure"]
     },
     {
-      "description": "Require dashboard approval for major updates",
+      "description": "Monthly window for infrastructure major upgrades",
+      "matchManagers": ["github-actions", "dockerfile", "docker-compose"],
       "matchUpdateTypes": ["major"],
-      "dependencyDashboardApproval": true
+      "schedule": ["* * 1-3 * *"]
+    },
+    {
+      "description": "Dashboard approval only for sensitive major upgrades",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "matchPackageNames": [
+        "next",
+        "react",
+        "react-dom",
+        "eslint-config-next",
+        "@types/react",
+        "@types/react-dom",
+        "prisma",
+        "@prisma/client",
+        "@prisma/adapter-*",
+        "@prisma/extension-*",
+        "better-auth",
+        "@better-auth/**",
+        "stripe",
+        "@stripe/**"
+      ]
+    },
+    {
+      "description": "Keep lockfile maintenance behind dependency fixes",
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "prPriority": -3
     }
-  ]
+  ],
+  "baseBranchPatterns": ["dev"],
+  "automerge": false,
+  "dependencyDashboardApproval": false,
+  "labels": ["dependencies"],
+  "separateMajorMinor": true,
+  "separateMinorPatch": true,
+  "internalChecksFilter": "strict",
+  "prCreation": "immediate",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["* * * * 1"],
+    "automerge": false,
+    "addLabels": ["maintenance"]
+  }
 }

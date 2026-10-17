@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
         pronouns: true,
         showAge: true,
         showExactBirthdate: true,
+        showConventions: true,
         socialLinks: true,
         createdAt: true,
         updatedAt: true,
@@ -224,6 +225,10 @@ export async function PATCH(req: NextRequest) {
 
     const { id: _, ...updateData } = body;
 
+    if ("email" in updateData) {
+      return NextResponse.json({ error: "Use the verified email change flow to update your email address" }, { status: 400 });
+    }
+
     const parsed = userSchema.safeParse(updateData);
     if (!parsed.success) {
       return NextResponse.json({ error: z.treeifyError(parsed.error) }, { status: 400 });
@@ -296,6 +301,7 @@ export async function PATCH(req: NextRequest) {
         profilePictures: true,
         showAge: true,
         showExactBirthdate: true,
+        showConventions: true,
         socialLinks: true,
         createdAt: true,
         updatedAt: true,

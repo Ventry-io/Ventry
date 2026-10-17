@@ -30,6 +30,7 @@ model User {
   pronouns             String?
   showAge              Boolean              @default(true)
   showExactBirthdate   Boolean              @default(false)
+  showConventions      Boolean              @default(false)
   socialLinks          Json                 @default("{}")
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt

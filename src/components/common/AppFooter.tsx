@@ -4,7 +4,6 @@ import Container from "@mui/material/Container";
 import IconButton from "@mui/material/IconButton";
 import Link from "@mui/material/Link";
 import Stack from "@mui/material/Stack";
-import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import { getBuildInfo } from "@/lib/build-info";
 
@@ -58,19 +57,18 @@ export default function AppFooter() {
             <Typography component="p" variant="caption">
               Version {buildInfo.version} · {buildInfo.commit} · Built {buildInfo.buildDate}
             </Typography>
-            <Tooltip title="Open Ventry on GitHub">
-              <IconButton
-                aria-label="Open Ventry repository on GitHub"
-                component="a"
-                href={buildInfo.repositoryUrl}
-                rel="noopener noreferrer"
-                size="small"
-                sx={{ color: "text.secondary" }}
-                target="_blank"
-              >
-                <GitHubIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
+            <IconButton
+              aria-label="Open Ventry repository on GitHub"
+              title="Open Ventry on GitHub"
+              component="a"
+              href={buildInfo.repositoryUrl}
+              rel="noopener noreferrer"
+              size="small"
+              sx={{ color: "text.secondary" }}
+              target="_blank"
+            >
+              <GitHubIcon fontSize="small" />
+            </IconButton>
           </Stack>
         </Stack>
       </Container>

@@ -48,6 +48,7 @@ async function ProfilePageContent() {
       },
       accounts: {
         select: {
+          accountId: true,
           providerId: true,
           password: true // Check if password is set (in credential account)
         }
@@ -57,6 +58,7 @@ async function ProfilePageContent() {
       pronouns: true,
       showAge: true,
       showExactBirthdate: true,
+      showConventions: true,
       socialLinks: true,
       createdAt: true,
       updatedAt: true,
@@ -72,7 +74,7 @@ async function ProfilePageContent() {
   const isOrganization = user.adminProfile?.type === "ORGANIZATION";
 
   return (
-    <Container maxWidth="md">
+    <Container maxWidth="lg">
       <Box sx={{ py: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           <Typography variant="h5" component="h1" fontWeight={700}>

@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "@/lib/prisma/prisma";
 import { toNextJsHandler } from "better-auth/next-js";
-import { createAuthMiddleware, APIError } from "better-auth/api";
+import { createAuthMiddleware, APIError, getSessionFromCtx } from "better-auth/api";
 import { passkey } from "@better-auth/passkey";
 import { lastLoginMethod, twoFactor, multiSession } from "better-auth/plugins";
 import { hashPassword } from "@/lib/bcrypt";
@@ -51,6 +51,18 @@ export const auth = betterAuth({
     session: {},
     hooks: {
         before: createAuthMiddleware(async (ctx) => {
+            if (ctx.path === "/unlink-account") {
+                const session = await getSessionFromCtx(ctx);
+                if (!session) return; // The endpoint's session middleware rejects unauthenticated requests.
+                if (ctx.body?.providerId === "credential" || ctx.body?.providerId === "credentials") {
+                    throw new APIError("BAD_REQUEST", { message: "Email sign-in is required and cannot be removed." });
+                }
+                const accounts = await ctx.context.internalAdapter.findAccounts(session.user.id);
+                if (!accounts.some(account => account.providerId === "credential" && account.password)) {
+                    throw new APIError("BAD_REQUEST", { message: "Set an email password before removing linked accounts." });
+                }
+                return;
+            }
             // Registration writes go straight through better-auth, bypassing any
             // client-side zod schema entirely, so this is the real validation
             // boundary for legalName/address*/name on sign-up.
@@ -93,6 +105,19 @@ export const auth = betterAuth({
         },
     },
     user: {
+        changeEmail: {
+            enabled: true,
+            sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+                const html = await renderComponentToHTML(EmailVerificationMail, {
+                    userName: user.name,
+                    newEmail,
+                    verificationUrl: url,
+                    expiryHours: 24,
+                });
+                const { success } = await sendMail(user.email, "Confirm Your Email Change - Ventry", html);
+                if (!success) throw new Error("Failed to send email change confirmation");
+            },
+        },
         additionalFields: {
             isAdmin: {
                 type: "boolean",
@@ -180,16 +205,16 @@ export const auth = betterAuth({
         autoSignInAfterVerification: true,
 
         sendVerificationEmail: async ({ user, url }) => {
-            // Rewrite the callbackURL so users land on /?status=email_verified after verification
-            const verificationUrl = url.replace(
-                /callbackURL=[^&]*/,
-                `callbackURL=${encodeURIComponent("/?status=email_verified")}`
-            );
+            const verificationUrl = new URL(url);
+            const callbackURL = verificationUrl.searchParams.get("callbackURL");
+            if (!callbackURL || callbackURL === "/") {
+                verificationUrl.searchParams.set("callbackURL", "/?status=email_verified");
+            }
             // Send email verification using proper template
             try {
                 const verificationHTML = await renderComponentToHTML(EmailVerificationMail, {
                     userName: user.name,
-                    verificationUrl,
+                    verificationUrl: verificationUrl.toString(),
                     expiryHours: 24
                 });
 

@@ -6,7 +6,6 @@ import {
   Typography,
   TextField,
   Button,
-  Divider,
   Switch,
   FormControlLabel,
   Accordion,
@@ -23,7 +22,12 @@ import {
   Card,
   CardContent,
   CardActions,
-  InputAdornment
+  InputAdornment,
+  Link,
+  Tabs,
+  Tab,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   Save,
@@ -46,6 +50,7 @@ import { DISPLAY_NAME_MAX_LENGTH } from '@/lib/user/display-name';
 import CountryAutocomplete from '@/components/common/CountryAutocomplete';
 import { calculateRealisticAge, getBirthDateBounds } from '@/lib/user/birthdate';
 import { diffPayload } from '@/lib/diffPayload';
+import authClient from '@/lib/auth/client';
 import { notifyProfilePictureChanged } from '@/lib/user/profilePictureEvents';
 
 interface ProfilePicture {
@@ -77,6 +82,7 @@ interface ProfileUpdatePayload {
   pronouns: string;
   showAge: boolean;
   showExactBirthdate: boolean;
+  showConventions: boolean;
   socialLinks: SocialLinks;
   [key: string]: unknown;
 }
@@ -96,6 +102,7 @@ interface User {
   addressCountry?: string | null;
   profilePictures: ProfilePicture[];
   accounts: Array<{
+    accountId: string;
     providerId: string;
     password?: string | null;
   }>;
@@ -104,6 +111,7 @@ interface User {
   pronouns?: string | null;
   showAge: boolean;
   showExactBirthdate: boolean;
+  showConventions?: boolean;
   socialLinks?: SocialLinks | null;
   createdAt: Date;
   updatedAt: Date;
@@ -130,6 +138,7 @@ interface ProfileFormData {
   pronouns: string;
   showAge: boolean;
   showExactBirthdate: boolean;
+  showConventions: boolean;
   customPronouns?: string;
   socialLinks: {
     telegram: string;
@@ -137,6 +146,14 @@ interface ProfileFormData {
     instagram: string;
   };
 }
+
+const PROFILE_TABS = [
+  { value: 'general', label: 'General' },
+  { value: 'personal', label: 'Personal information' },
+  { value: 'socials', label: 'Socials' },
+  { value: 'auth', label: 'Authentication' },
+  { value: 'advanced', label: 'Advanced' },
+];
 
 const PRONOUN_OPTIONS = [
   'she/her',
@@ -189,6 +206,13 @@ function extractApiErrorMessage(payload: unknown): string | null {
   return topLevelErrors?.[0] ?? null;
 }
 
+function renderSocialLink(baseUrl: string, username: string) {
+  const handle = username.trim().replace(/^@/, '');
+  if (!handle) return `${baseUrl}username`;
+  const url = `${baseUrl}${encodeURIComponent(handle)}`;
+  return <Link href={url} target="_blank" rel="noopener noreferrer" sx={{ overflowWrap: 'anywhere' }}>{url}</Link>;
+}
+
 const sectionSx = {
   p: { xs: 2, md: 2.5 },
   border: '1px solid',
@@ -198,6 +222,12 @@ const sectionSx = {
 };
 
 export default function ProfilePageClient({ user, isOrganization = false }: ProfilePageClientProps) {
+  const theme = useTheme();
+  const desktop = useMediaQuery(theme.breakpoints.up('md'));
+  const [activeTab, setActiveTab] = useState('general');
+  const [newEmail, setNewEmail] = useState('');
+  const [changingEmail, setChangingEmail] = useState(false);
+  const [emailRequested, setEmailRequested] = useState(false);
   const socialLinks = (user.socialLinks as SocialLinks | null | undefined) ?? {};
   const [formData, setFormData] = useState<ProfileFormData>({
     name: user.name || '',
@@ -217,6 +247,7 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
     pronouns: user.pronouns || '',
     showAge: user.showAge ?? true,
     showExactBirthdate: user.showExactBirthdate ?? false,
+    showConventions: user.showConventions ?? false,
     customPronouns: user.pronouns && !PRONOUN_OPTIONS.includes(user.pronouns) ? user.pronouns : undefined,
     socialLinks: {
       telegram: socialLinks.telegram || '',
@@ -246,6 +277,7 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
     pronouns: user.pronouns || '',
     showAge: user.showAge ?? true,
     showExactBirthdate: user.showExactBirthdate ?? false,
+    showConventions: user.showConventions ?? false,
     socialLinks: {
       ...(socialLinks.telegram && { telegram: socialLinks.telegram }),
       ...(socialLinks.twitter && { twitter: socialLinks.twitter }),
@@ -277,9 +309,17 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (PROFILE_TABS.some(item => item.value === tab)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Restore the tab after email verification.
+      setActiveTab(tab || 'general');
+      if (params.has('error')) {
+        setError('Email verification failed. The link may have expired. Please request the change again.');
+      }
+    }
     if (params.get('linked') === 'success') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- URL param check must run in effect
       setLinkSuccess(true);
+      setActiveTab('auth');
       window.history.replaceState({}, '', '/profile');
       setTimeout(() => setLinkSuccess(false), 5000);
     }
@@ -382,6 +422,7 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
       pronouns,
       showAge: formData.showAge,
       showExactBirthdate: formData.showExactBirthdate,
+      showConventions: formData.showConventions,
       socialLinks: socialLinksPayload,
     };
 
@@ -419,6 +460,27 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
       setError(err instanceof Error ? err.message : 'Failed to update profile');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleChangeEmail = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setChangingEmail(true);
+    setEmailRequested(false);
+    setError(null);
+    try {
+      const result = await authClient.changeEmail({
+        newEmail: newEmail.trim(),
+        callbackURL: '/profile?tab=auth',
+      });
+      if (result.error) {
+        throw new Error(result.error.message || 'Failed to request email change. Please sign in again and retry.');
+      }
+      setEmailRequested(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to request email change');
+    } finally {
+      setChangingEmail(false);
     }
   };
 
@@ -494,451 +556,553 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
         </Alert>
       )}
 
-      <Box sx={sectionSx}>
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="h5" fontWeight={700}>
-            Profile Pictures
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {profilePictures.length} uploaded photo{profilePictures.length === 1 ? '' : 's'}
-          </Typography>
-        </Box>
-        <ProfilePictureGallery
-          userId={user.id}
-          profilePictures={profilePictures}
-          userName={formData.name}
-          userEmail={user.email}
-          onPicturesUpdate={refreshProfilePictures}
-        />
-      </Box>
-
-      <Box sx={sectionSx}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" sx={{ mb: 3 }}>
-          <Box>
-            <Typography variant="h5" fontWeight={700}>
-              Basic Information
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Public profile details and discoverability.
-            </Typography>
-          </Box>
-          <Chip icon={<Public />} label={formData.country ? 'Public profile ready' : 'Country optional'} size="small" color={formData.country ? 'primary' : 'default'} />
-        </Stack>
-
-        <Stack spacing={3}>
-          <TextField
-            label="Display Name"
-            value={formData.name}
-            onChange={handleInputChange('name')}
-            fullWidth
-            error={displayNameTooLong}
-            inputProps={{ maxLength: DISPLAY_NAME_MAX_LENGTH }}
-            helperText={displayNameTooLong
-              ? `Display name must be ${DISPLAY_NAME_MAX_LENGTH} characters or fewer.`
-              : `${displayNameLength}/${DISPLAY_NAME_MAX_LENGTH} characters`}
-          />
-
-          <TextField
-            label="Username"
-            value={formData.username}
-            onChange={handleInputChange('username')}
-            fullWidth
-            inputProps={{ maxLength: DISPLAY_NAME_MAX_LENGTH }}
-            helperText="Shown in your profile URL and @mentions. No spaces - use hyphens or underscores instead."
-          />
-
-          <CountryAutocomplete
-            label="Country"
-            value={formData.country}
-            onChange={(value) => setFormData(prev => ({ ...prev, country: value }))}
-            helperText="Shown on your profile with a flag"
-          />
-
-          <Accordion variant="outlined" disableGutters sx={{ borderRadius: 1, '&:before': { display: 'none' } }}>
-            <AccordionSummary
-              expandIcon={<ExpandMore />}
-              sx={{ '& .MuiAccordionSummary-content': { minWidth: 0, overflow: 'hidden' } }}
-            >
-              <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1, pr: 1 }}>
-                <Badge color="action" sx={{ flexShrink: 0 }} />
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="subtitle1" fontWeight={700}>
-                    {isOrganization ? "Organization Details" : "Check-in Identity"}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {isOrganization
-                      ? "Legal name and address of your organization."
-                      : "Legal name and address for on-site verification."}
-                  </Typography>
-                </Box>
-                <Chip
-                  label={hasCheckInIdentity ? 'Added' : 'Empty'}
-                  size="small"
-                  color={hasCheckInIdentity ? 'success' : 'default'}
-                  sx={{ flexShrink: 0 }}
-                />
-              </Stack>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Stack spacing={2.5}>
-                <Alert severity="info">
-                  This information is used for event check-in and is not shown on your public profile.
-                </Alert>
-
-                <TextField
-                  label="Legal Name"
-                  value={formData.legalName}
-                  onChange={handleInputChange('legalName')}
-                  fullWidth
-                  inputProps={{ maxLength: 200 }}
-                  helperText="Used by event staff for ID checks."
-                />
-
-                <TextField
-                  label="Address"
-                  value={formData.addressLine1}
-                  onChange={handleInputChange('addressLine1')}
-                  fullWidth
-                  autoComplete="street-address"
-                  inputProps={{ maxLength: 200 }}
-                />
-
-                <TextField
-                  label="Address line 2"
-                  value={formData.addressLine2}
-                  onChange={handleInputChange('addressLine2')}
-                  fullWidth
-                  autoComplete="address-line2"
-                  inputProps={{ maxLength: 200 }}
-                />
-
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                  <TextField
-                    label="City"
-                    value={formData.addressCity}
-                    onChange={handleInputChange('addressCity')}
-                    fullWidth
-                    autoComplete="address-level2"
-                    inputProps={{ maxLength: 120 }}
-                  />
-
-                  <TextField
-                    label="State/Region"
-                    value={formData.addressState}
-                    onChange={handleInputChange('addressState')}
-                    fullWidth
-                    autoComplete="address-level1"
-                    inputProps={{ maxLength: 120 }}
-                  />
-                </Stack>
-
-                <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                  <TextField
-                    label="Postal code"
-                    value={formData.addressPostalCode}
-                    onChange={handleInputChange('addressPostalCode')}
-                    fullWidth
-                    autoComplete="postal-code"
-                    inputProps={{ maxLength: 40 }}
-                  />
-
-                  <CountryAutocomplete
-                    label="Address country"
-                    value={formData.addressCountry}
-                    onChange={(value) => setFormData(prev => ({ ...prev, addressCountry: value }))}
-                  />
-                </Stack>
-              </Stack>
-            </AccordionDetails>
-          </Accordion>
-
-          <Divider />
-
-          <TextField
-            label="Bio"
-            value={formData.bio}
-            onChange={handleInputChange('bio')}
-            multiline
-            rows={4}
-            fullWidth
-            placeholder={isOrganization ? "Tell us about your organization..." : "Tell us about yourself..."}
-            inputProps={{ maxLength: 500 }}
-            helperText={`${formData.bio.length}/500 characters`}
-          />
-
-          {!isOrganization && (
-            <>
-              <TextField
-                label="Date of Birth"
-                type="date"
-                value={formData.dateOfBirth}
-                onChange={handleInputChange('dateOfBirth')}
-                fullWidth
-                helperText="Your age will only be shown if you enable it in privacy settings"
-                InputLabelProps={{ shrink: true }}
-                inputProps={{
-                  min: birthDateBounds.min,
-                  max: birthDateBounds.max,
-                }}
-              />
-
-              {displayedAge !== null && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Chip
-                    label={`Age: ${displayedAge}`}
-                    color={formData.showAge ? 'primary' : 'default'}
-                    icon={formData.showAge ? <Visibility /> : <VisibilityOff />}
-                  />
-                  <Typography variant="body2" color="text.secondary">
-                    {formData.showAge ? 'Visible to others' : 'Hidden from others'}
-                  </Typography>
-                </Box>
-              )}
-
-              <TextField
-                label="Pronouns"
-                value={formData.pronouns}
-                onChange={handleInputChange('pronouns')}
-                select
-                fullWidth
-                helperText="Help others know how to refer to you"
-              >
-                {PRONOUN_OPTIONS.map((option) => (
-                  <MenuItem key={option} value={option}>
-                    {option}
-                  </MenuItem>
-                ))}
-              </TextField>
-              {formData.pronouns === "choose my own pronouns" && (
-                <TextField
-                  label="Custom Pronouns"
-                  type="text"
-                  value={formData.customPronouns}
-                  onChange={handleInputChange('customPronouns')}
-                  fullWidth
-                  inputProps={{ maxLength: 50 }}
-                />
-              )}
-            </>
-          )}
-        </Stack>
-      </Box>
-
-      <Box sx={sectionSx}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" sx={{ mb: 2 }}>
-          <Box>
-            <Typography variant="h5" fontWeight={700}>
-              Social Links
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Usernames appear as clickable profile chips.
-            </Typography>
-          </Box>
-          <Chip
-            label={`${Object.values(formData.socialLinks).filter(Boolean).length}/3 linked`}
-            size="small"
-          />
-        </Stack>
-
-        <Stack spacing={2}>
-          <TextField
-            label="Telegram"
-            value={formData.socialLinks.telegram}
-            onChange={handleSocialChange('telegram')}
-            fullWidth
-            placeholder="username"
-            inputProps={{ maxLength: 100 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Telegram color="action" />
-                </InputAdornment>
-              )
-            }}
-            helperText="https://t.me/username"
-          />
-          <TextField
-            label="Twitter / X"
-            value={formData.socialLinks.twitter}
-            onChange={handleSocialChange('twitter')}
-            fullWidth
-            placeholder="username"
-            inputProps={{ maxLength: 100 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Twitter color="action" />
-                </InputAdornment>
-              )
-            }}
-            helperText="https://x.com/username"
-          />
-          <TextField
-            label="Instagram"
-            value={formData.socialLinks.instagram}
-            onChange={handleSocialChange('instagram')}
-            fullWidth
-            placeholder="username"
-            inputProps={{ maxLength: 100 }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <PhotoCamera color="action" />
-                </InputAdornment>
-              )
-            }}
-            helperText="https://instagram.com/username"
-          />
-        </Stack>
-      </Box>
-
-      {!isOrganization && (
-        <Box sx={sectionSx}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" sx={{ mb: 2 }}>
-            <Box>
-              <Typography variant="h5" fontWeight={700}>
-                Privacy Settings
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Control what appears on your public profile.
-              </Typography>
-            </Box>
-            <Chip
-              icon={formData.showAge ? <Visibility /> : <VisibilityOff />}
-              label={formData.showAge ? 'Age visible' : 'Age hidden'}
-              color={formData.showAge ? 'primary' : 'default'}
-              size="small"
-            />
-          </Stack>
-
-          <Stack spacing={2}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.showAge}
-                  onChange={(e) => setFormData(prev => ({ ...prev, showAge: e.target.checked }))}
-                />
-              }
-              label="Show my age publicly"
-            />
-            <Typography variant="body2" color="text.secondary">
-              When enabled, your age will be visible to other users.
-            </Typography>
-
-            {formData.showAge && (
-              <>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={formData.showExactBirthdate}
-                      onChange={(e) => setFormData(prev => ({ ...prev, showExactBirthdate: e.target.checked }))}
-                    />
-                  }
-                  label="Show exact birth date (not just age)"
-                />
-                <Typography variant="body2" color="text.secondary">
-                  When enabled, your exact birth date is shown in addition to your age.
-                </Typography>
-              </>
-            )}
-          </Stack>
-        </Box>
-      )}
-
-      {!isOrganization && (
-        <Box sx={sectionSx}>
-          <Typography variant="h5" fontWeight={700} sx={{ mb: 2 }}>
-            My Registrations
-          </Typography>
-          <MyRegistrations userId={user.id} />
-        </Box>
-      )}
-
-      <Box>
-        <LinkedAccounts
-          accounts={user.accounts}
-          hasPassword={!!user.accounts.find(a => a.providerId === 'credential')?.password}
-          hasOAuthProviders={user.accounts.some(a => a.providerId === 'github' || a.providerId === 'google')}
-        />
-      </Box>
-
-      <Box sx={sectionSx}>
-        <Typography variant="h5" fontWeight={700} sx={{ mb: 2 }}>
-          Account Management
-        </Typography>
-
-        <Stack spacing={2}>
-          <Card variant="outlined">
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Download Your Data
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Export all your personal data as required by GDPR. This includes your profile, events, and any other data we have stored.
-              </Typography>
-            </CardContent>
-            <CardActions>
-              <Button
-                variant="outlined"
-                startIcon={<Download />}
-                onClick={() => setDownloadDialogOpen(true)}
-              >
-                Download Data
-              </Button>
-            </CardActions>
-          </Card>
-
-          <Card variant="outlined" sx={{ borderColor: 'error.main' }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom color="error">
-                Delete Account
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Permanently delete your account and all associated data. This action cannot be undone.
-              </Typography>
-            </CardContent>
-            <CardActions>
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={<Delete />}
-                onClick={() => setDeleteDialogOpen(true)}
-              >
-                Delete Account
-              </Button>
-            </CardActions>
-          </Card>
-        </Stack>
-      </Box>
-
-      <Box
-        sx={{
-          position: 'sticky',
-          bottom: 16,
-          zIndex: 2,
-          display: 'flex',
-          justifyContent: 'flex-end',
-          p: 1.5,
-          border: '1px solid',
-          borderColor: 'divider',
-          borderRadius: 1,
-          bgcolor: 'background.paper',
-          boxShadow: 3,
-        }}
-      >
-        <Button
-          variant="contained"
-          size="large"
-          startIcon={<Save />}
-          onClick={() => {
-            handleSave().catch(err => {
-              setError(err instanceof Error ? err.message : 'Failed to update profile');
-            });
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, alignItems: 'flex-start' }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_, value: string) => setActiveTab(value)}
+          orientation={desktop ? 'vertical' : 'horizontal'}
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
+          aria-label="Profile settings"
+          sx={{
+            width: { xs: '100%', md: 220 },
+            flexShrink: 0,
+            position: { md: 'sticky' },
+            top: { md: 88 },
+            borderBottom: { xs: 1, md: 0 },
+            borderColor: 'divider',
+            '& .MuiTab-root': { alignItems: 'flex-start', textAlign: 'left', textTransform: 'none' },
           }}
-          disabled={saving || displayNameTooLong}
         >
-          {saving ? 'Saving...' : 'Save Changes'}
-        </Button>
+          {PROFILE_TABS.map(tab => (
+            <Tab key={tab.value} value={tab.value} label={tab.label} id={`profile-tab-${tab.value}`} aria-controls={`profile-panel-${tab.value}`} />
+          ))}
+        </Tabs>
+        <Box sx={{ flex: 1, minWidth: 0, width: '100%' }}>
+          <Box role="tabpanel" id="profile-panel-general" aria-labelledby="profile-tab-general" hidden={activeTab !== 'general'} tabIndex={0}>
+            {activeTab === 'general' && (
+              <Stack spacing={2.5}>
+                <Box sx={sectionSx}>
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="h5" fontWeight={700}>
+                      Profile Pictures
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {profilePictures.length} uploaded photo{profilePictures.length === 1 ? '' : 's'}
+                    </Typography>
+                  </Box>
+                  <ProfilePictureGallery
+                    userId={user.id}
+                    profilePictures={profilePictures}
+                    userName={formData.name}
+                    userEmail={user.email}
+                    onPicturesUpdate={refreshProfilePictures}
+                  />
+                </Box>
+
+                <Box sx={sectionSx}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" sx={{ mb: 3 }}>
+                    <Box>
+                      <Typography variant="h5" fontWeight={700}>
+                        Basic Information
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Public profile details and discoverability.
+                      </Typography>
+                    </Box>
+                    <Chip icon={<Public />} label={formData.country ? 'Public profile ready' : 'Country optional'} size="small" color={formData.country ? 'primary' : 'default'} />
+                  </Stack>
+
+                  <Stack spacing={3}>
+                    <TextField
+                      label="Display Name"
+                      value={formData.name}
+                      onChange={handleInputChange('name')}
+                      fullWidth
+                      error={displayNameTooLong}
+                      inputProps={{ maxLength: DISPLAY_NAME_MAX_LENGTH }}
+                      helperText={displayNameTooLong
+                        ? `Display name must be ${DISPLAY_NAME_MAX_LENGTH} characters or fewer.`
+                        : `${displayNameLength}/${DISPLAY_NAME_MAX_LENGTH} characters`}
+                    />
+
+                    <TextField
+                      label="Username"
+                      value={formData.username}
+                      onChange={handleInputChange('username')}
+                      fullWidth
+                      inputProps={{ maxLength: DISPLAY_NAME_MAX_LENGTH }}
+                      helperText="Shown in your profile URL and @mentions. No spaces - use hyphens or underscores instead."
+                    />
+
+                    <CountryAutocomplete
+                      label="Country"
+                      value={formData.country}
+                      onChange={(value) => setFormData(prev => ({ ...prev, country: value }))}
+                      helperText="Shown on your profile with a flag"
+                    />
+
+                    <TextField
+                      label="Bio"
+                      value={formData.bio}
+                      onChange={handleInputChange('bio')}
+                      multiline
+                      rows={4}
+                      fullWidth
+                      placeholder={isOrganization ? "Tell us about your organization..." : "Tell us about yourself..."}
+                      inputProps={{ maxLength: 500 }}
+                      helperText={`${formData.bio.length}/500 characters`}
+                    />
+
+                  </Stack>
+                </Box>
+
+                {!isOrganization && (
+                  <Box sx={sectionSx}>
+                    <Typography variant="h5" fontWeight={700} sx={{ mb: 2 }}>
+                      My Registrations
+                    </Typography>
+                    <MyRegistrations userId={user.id} />
+                  </Box>
+                )}
+              </Stack>
+            )}
+          </Box>
+          <Box role="tabpanel" id="profile-panel-personal" aria-labelledby="profile-tab-personal" hidden={activeTab !== 'personal'} tabIndex={0}>
+            {activeTab === 'personal' && (
+              <Stack spacing={2.5}>
+                <Box sx={sectionSx}>
+                  <Typography variant="h5" fontWeight={700} sx={{ mb: 3 }}>
+                    Personal Information
+                  </Typography>
+                  <Stack spacing={3}>
+                    <Accordion variant="outlined" disableGutters sx={{ borderRadius: 1, '&:before': { display: 'none' } }}>
+                      <AccordionSummary
+                        expandIcon={<ExpandMore />}
+                        sx={{ '& .MuiAccordionSummary-content': { minWidth: 0, overflow: 'hidden' } }}
+                      >
+                        <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1, pr: 1 }}>
+                          <Badge color="action" sx={{ flexShrink: 0 }} />
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography variant="subtitle1" fontWeight={700}>
+                              {isOrganization ? "Organization Details" : "Check-in Identity"}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              {isOrganization
+                                ? "Legal name and address of your organization."
+                                : "Legal name and address for on-site verification."}
+                            </Typography>
+                          </Box>
+                          <Chip
+                            label={hasCheckInIdentity ? 'Added' : 'Empty'}
+                            size="small"
+                            color={hasCheckInIdentity ? 'success' : 'default'}
+                            sx={{ flexShrink: 0 }}
+                          />
+                        </Stack>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Stack spacing={2.5}>
+                          <Alert severity="info">
+                            This information is used for event check-in and is not shown on your public profile.
+                          </Alert>
+
+                          <TextField
+                            label="Legal Name"
+                            value={formData.legalName}
+                            onChange={handleInputChange('legalName')}
+                            fullWidth
+                            inputProps={{ maxLength: 200 }}
+                            helperText="Used by event staff for ID checks."
+                          />
+
+                          <TextField
+                            label="Address"
+                            value={formData.addressLine1}
+                            onChange={handleInputChange('addressLine1')}
+                            fullWidth
+                            autoComplete="street-address"
+                            inputProps={{ maxLength: 200 }}
+                          />
+
+                          <TextField
+                            label="Address line 2"
+                            value={formData.addressLine2}
+                            onChange={handleInputChange('addressLine2')}
+                            fullWidth
+                            autoComplete="address-line2"
+                            inputProps={{ maxLength: 200 }}
+                          />
+
+                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                            <TextField
+                              label="City"
+                              value={formData.addressCity}
+                              onChange={handleInputChange('addressCity')}
+                              fullWidth
+                              autoComplete="address-level2"
+                              inputProps={{ maxLength: 120 }}
+                            />
+
+                            <TextField
+                              label="State/Region"
+                              value={formData.addressState}
+                              onChange={handleInputChange('addressState')}
+                              fullWidth
+                              autoComplete="address-level1"
+                              inputProps={{ maxLength: 120 }}
+                            />
+                          </Stack>
+
+                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                            <TextField
+                              label="Postal code"
+                              value={formData.addressPostalCode}
+                              onChange={handleInputChange('addressPostalCode')}
+                              fullWidth
+                              autoComplete="postal-code"
+                              inputProps={{ maxLength: 40 }}
+                            />
+
+                            <CountryAutocomplete
+                              label="Address country"
+                              value={formData.addressCountry}
+                              onChange={(value) => setFormData(prev => ({ ...prev, addressCountry: value }))}
+                            />
+                          </Stack>
+                        </Stack>
+                      </AccordionDetails>
+                    </Accordion>
+
+                    {!isOrganization && (
+                      <>
+                        <TextField
+                          label="Date of Birth"
+                          type="date"
+                          value={formData.dateOfBirth}
+                          onChange={handleInputChange('dateOfBirth')}
+                          fullWidth
+                          helperText="Your age will only be shown if you enable it in privacy settings"
+                          InputLabelProps={{ shrink: true }}
+                          inputProps={{
+                            min: birthDateBounds.min,
+                            max: birthDateBounds.max,
+                          }}
+                        />
+
+                        {displayedAge !== null && (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Chip
+                              label={`Age: ${displayedAge}`}
+                              color={formData.showAge ? 'primary' : 'default'}
+                              icon={formData.showAge ? <Visibility /> : <VisibilityOff />}
+                            />
+                            <Typography variant="body2" color="text.secondary">
+                              {formData.showAge ? 'Visible to others' : 'Hidden from others'}
+                            </Typography>
+                          </Box>
+                        )}
+
+                        <TextField
+                          label="Pronouns"
+                          value={formData.pronouns}
+                          onChange={handleInputChange('pronouns')}
+                          select
+                          fullWidth
+                          helperText="Help others know how to refer to you"
+                        >
+                          {PRONOUN_OPTIONS.map((option) => (
+                            <MenuItem key={option} value={option}>
+                              {option}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                        {formData.pronouns === "choose my own pronouns" && (
+                          <TextField
+                            label="Custom Pronouns"
+                            type="text"
+                            value={formData.customPronouns}
+                            onChange={handleInputChange('customPronouns')}
+                            fullWidth
+                            inputProps={{ maxLength: 50 }}
+                          />
+                        )}
+                      </>
+                    )}
+                  </Stack>
+                </Box>
+
+                {!isOrganization && (
+                  <Box sx={sectionSx}>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" sx={{ mb: 2 }}>
+                      <Box>
+                        <Typography variant="h5" fontWeight={700}>
+                          Privacy Settings
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Control what appears on your public profile.
+                        </Typography>
+                      </Box>
+                      <Chip
+                        icon={formData.showAge ? <Visibility /> : <VisibilityOff />}
+                        label={formData.showAge ? 'Age visible' : 'Age hidden'}
+                        color={formData.showAge ? 'primary' : 'default'}
+                        size="small"
+                      />
+                    </Stack>
+
+                    <Stack spacing={2}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={formData.showAge}
+                            onChange={(e) => setFormData(prev => ({ ...prev, showAge: e.target.checked }))}
+                          />
+                        }
+                        label="Show my age publicly"
+                      />
+                      <Typography variant="body2" color="text.secondary">
+                        When enabled, your age will be visible to other users.
+                      </Typography>
+
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            checked={formData.showConventions}
+                            onChange={(e) => setFormData(prev => ({ ...prev, showConventions: e.target.checked }))}
+                          />
+                        }
+                        label="Show all my cons publicly"
+                      />
+                      <Typography variant="body2" color="text.secondary">
+                        Show all your past and upcoming confirmed cons on your public profile. Tickets and payment details stay private.
+                      </Typography>
+
+                      {formData.showAge && (
+                        <>
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                checked={formData.showExactBirthdate}
+                                onChange={(e) => setFormData(prev => ({ ...prev, showExactBirthdate: e.target.checked }))}
+                              />
+                            }
+                            label="Show exact birth date (not just age)"
+                          />
+                          <Typography variant="body2" color="text.secondary">
+                            When enabled, your exact birth date is shown in addition to your age.
+                          </Typography>
+                        </>
+                      )}
+                    </Stack>
+                  </Box>
+                )}
+              </Stack>
+            )}
+          </Box>
+          <Box role="tabpanel" id="profile-panel-socials" aria-labelledby="profile-tab-socials" hidden={activeTab !== 'socials'} tabIndex={0}>
+            {activeTab === 'socials' && (
+              <Stack spacing={2.5}>
+                <Box sx={sectionSx}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" sx={{ mb: 2 }}>
+                    <Box>
+                      <Typography variant="h5" fontWeight={700}>
+                        Social Links
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Usernames appear as clickable profile chips.
+                      </Typography>
+                    </Box>
+                    <Chip
+                      label={`${Object.values(formData.socialLinks).filter(Boolean).length}/3 linked`}
+                      size="small"
+                    />
+                  </Stack>
+
+                  <Stack spacing={2}>
+                    <TextField
+                      label="Telegram"
+                      value={formData.socialLinks.telegram}
+                      onChange={handleSocialChange('telegram')}
+                      fullWidth
+                      placeholder="username"
+                      inputProps={{ maxLength: 100 }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Telegram color="action" />
+                          </InputAdornment>
+                        )
+                      }}
+                      helperText={renderSocialLink('https://t.me/', formData.socialLinks.telegram)}
+                    />
+                    <TextField
+                      label="Twitter / X"
+                      value={formData.socialLinks.twitter}
+                      onChange={handleSocialChange('twitter')}
+                      fullWidth
+                      placeholder="username"
+                      inputProps={{ maxLength: 100 }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Twitter color="action" />
+                          </InputAdornment>
+                        )
+                      }}
+                      helperText={renderSocialLink('https://x.com/', formData.socialLinks.twitter)}
+                    />
+                    <TextField
+                      label="Instagram"
+                      value={formData.socialLinks.instagram}
+                      onChange={handleSocialChange('instagram')}
+                      fullWidth
+                      placeholder="username"
+                      inputProps={{ maxLength: 100 }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <PhotoCamera color="action" />
+                          </InputAdornment>
+                        )
+                      }}
+                      helperText={renderSocialLink('https://instagram.com/', formData.socialLinks.instagram)}
+                    />
+                  </Stack>
+                </Box>
+              </Stack>
+            )}
+          </Box>
+          <Box role="tabpanel" id="profile-panel-auth" aria-labelledby="profile-tab-auth" hidden={activeTab !== 'auth'} tabIndex={0}>
+            {activeTab === 'auth' && (
+              <Stack spacing={2.5}>
+                <Box component="form" sx={sectionSx} onSubmit={handleChangeEmail}>
+                  <Typography variant="h5" fontWeight={700} sx={{ mb: 1 }}>
+                    Email Address
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                    Current email: {user.email}. Confirm the change from your current inbox, then verify your new address.
+                  </Typography>
+                  <Stack spacing={2}>
+                    {emailRequested && (
+                      <Alert severity="success">
+                        Request received. If the new address is available, check your current inbox to approve the change, then your new inbox to verify it. Your email stays unchanged until verification is complete.
+                      </Alert>
+                    )}
+                    <TextField
+                      label="New email address"
+                      type="email"
+                      autoComplete="email"
+                      required
+                      fullWidth
+                      value={newEmail}
+                      onChange={event => {
+                        setNewEmail(event.target.value);
+                        setEmailRequested(false);
+                      }}
+                    />
+                    <Button
+                      type="submit"
+                      variant="outlined"
+                      disabled={changingEmail || !newEmail.trim() || newEmail.trim().toLowerCase() === user.email.toLowerCase()}
+                      sx={{ alignSelf: 'flex-start' }}
+                    >
+                      {changingEmail ? 'Sending...' : 'Change Email'}
+                    </Button>
+                  </Stack>
+                </Box>
+
+                <Box>
+                  <LinkedAccounts
+                    accounts={user.accounts}
+                    hasPassword={!!user.accounts.find(a => a.providerId === 'credential')?.password}
+                  />
+                </Box>
+              </Stack>
+            )}
+          </Box>
+          <Box role="tabpanel" id="profile-panel-advanced" aria-labelledby="profile-tab-advanced" hidden={activeTab !== 'advanced'} tabIndex={0}>
+            {activeTab === 'advanced' && (
+              <Stack spacing={2.5}>
+                <Box sx={sectionSx}>
+                  <Typography variant="h5" fontWeight={700} sx={{ mb: 2 }}>
+                    Account Management
+                  </Typography>
+
+                  <Stack spacing={2}>
+                    <Card variant="outlined">
+                      <CardContent>
+                        <Typography variant="h6" gutterBottom>
+                          Download Your Data
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Export all your personal data as required by GDPR. This includes your profile, events, and any other data we have stored.
+                        </Typography>
+                      </CardContent>
+                      <CardActions>
+                        <Button
+                          variant="outlined"
+                          startIcon={<Download />}
+                          onClick={() => setDownloadDialogOpen(true)}
+                        >
+                          Download Data
+                        </Button>
+                      </CardActions>
+                    </Card>
+
+                    <Card variant="outlined" sx={{ borderColor: 'error.main' }}>
+                      <CardContent>
+                        <Typography variant="h6" gutterBottom color="error">
+                          Delete Account
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Permanently delete your account and all associated data. This action cannot be undone.
+                        </Typography>
+                      </CardContent>
+                      <CardActions>
+                        <Button
+                          variant="outlined"
+                          color="error"
+                          startIcon={<Delete />}
+                          onClick={() => setDeleteDialogOpen(true)}
+                        >
+                          Delete Account
+                        </Button>
+                      </CardActions>
+                    </Card>
+                  </Stack>
+                </Box>
+              </Stack>
+            )}
+          </Box>
+          {['general', 'personal', 'socials'].includes(activeTab) && (
+            <Box
+              sx={{
+                position: 'sticky',
+                bottom: 16,
+                zIndex: 2,
+                display: 'flex',
+                justifyContent: 'flex-end',
+                mt: 2.5,
+              }}
+            >
+              <Button
+                variant="contained"
+                size="large"
+                startIcon={<Save />}
+                onClick={() => {
+                  handleSave().catch(err => {
+                    setError(err instanceof Error ? err.message : 'Failed to update profile');
+                  });
+                }}
+                disabled={saving || displayNameTooLong}
+              >
+                {saving ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </Box>
+          )}
+        </Box>
       </Box>
 
       <DeleteAccountDialog onClose={() => setDeleteDialogOpen(false)} onDelete={handleDeleteAccount} open={deleteDialogOpen} userEmail={user.email} />

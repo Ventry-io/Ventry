@@ -14,7 +14,7 @@ import EmailVerificationMail from "@/components/emails/EmailVerificationMail";
 import { getTrustedOrigins } from "@/lib/security/origins";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
 import { signUpAdditionalFieldsSchema } from "@/types/schemas/signup";
-import { resolveUniqueUsername, sanitizeUsername } from "@/lib/user/unique-name";
+import { resolveUniqueUsername, sanitizeUsername, isUsernameAvailable } from "@/lib/user/unique-name";
 
 const cookiePrefix = "VENTRY";
 
@@ -25,8 +25,9 @@ function clampDisplayName(name: string | null | undefined) {
 export const auth = betterAuth({
     rateLimit: {
         enabled: true,
-        windowMs: 15 * 60 * 1000, // 15 minutes
-        maxRequests: 100, // limit each IP to 100 requests per windowMs
+        window: 15 * 60,
+        max: 100,
+        customRules: { "/send-verification-email": { window: 60, max: 1 } },
     },
     advanced: {
         cookiePrefix,
@@ -75,6 +76,10 @@ export const auth = betterAuth({
                 throw new APIError("BAD_REQUEST", {
                     message: parsed.error.issues[0]?.message ?? "Invalid registration data",
                 });
+            }
+
+            if (!(await isUsernameAvailable(sanitizeUsername(parsed.data.name)))) {
+                throw new APIError("CONFLICT", { message: "This username is taken. Choose another." });
             }
 
             return {
@@ -144,9 +149,9 @@ export const auth = betterAuth({
             // Raw "First Last" name from the OAuth profile, captured once at
             // signup as a suggestion for the legalName step in
             // CompleteProfileWizard. Deliberately separate from `legalName`
-            // itself: that field is what gates the onboarding wizard (see
-            // profileCompletion middleware), so pre-filling it here would let
-            // SSO signups skip the wizard entirely.
+            // itself: event registration requires the user to confirm their
+            // check-in name rather than silently treating a provider's
+            // display name as their legal identity.
             // NOT input:false - better-auth's OAuth-profile merge
             // (parseAdditionalUserInputFromProviderProfile) silently drops
             // any additionalField marked input:false before it ever reaches

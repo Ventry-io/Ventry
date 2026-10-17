@@ -31,6 +31,7 @@ async function ProfilePageContent() {
       name: true,
       username: true,
       email: true,
+      emailVerified: true,
       country: true,
       legalName: true,
       addressLine1: true,
@@ -95,6 +96,7 @@ async function ProfilePageContent() {
         <ProfilePageClient
           user={{ ...user, profilePictures, socialLinks: user.socialLinks as { telegram?: string; twitter?: string; instagram?: string } | null }}
           isOrganization={isOrganization}
+          isOrganizer={Boolean(user.adminProfile)}
         />
       </Box>
     </Container>

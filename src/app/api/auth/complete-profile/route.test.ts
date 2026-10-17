@@ -33,6 +33,7 @@ vi.mock("@/lib/user/profilePicture", () => ({
 
 import { POST } from "@/app/api/auth/complete-profile/route";
 import { getSession } from "@/lib/auth/session";
+import { middleware as profileCompletion } from "@/middlewares/profileCompletion";
 
 const mockedGetSession = getSession as unknown as ReturnType<typeof vi.fn>;
 
@@ -71,6 +72,43 @@ beforeEach(() => {
 });
 
 describe("POST /api/auth/complete-profile - username handling", () => {
+  it.each(["/privacy", "/imprint", "/profile", "/events/42"])("keeps %s accessible without check-in identity", async (path) => {
+    const res = await profileCompletion(new NextRequest(`https://local.dev:3443${path}`, { headers: { cookie: "VENTRY.session_token=test" } }));
+    expect(res.status).toBe(200);
+    expect(mockedGetSession).not.toHaveBeenCalled();
+  });
+
+  it("preserves the event registration destination when requesting booking details", async () => {
+    const res = await profileCompletion(new NextRequest("https://local.dev:3443/events/42/register?ticket=basic", { headers: { cookie: "__Secure-VENTRY.session_token=test" } }));
+    const destination = new URL(res.headers.get("location")!);
+    expect(destination.pathname).toBe("/complete-profile");
+    expect(destination.searchParams.get("intent")).toBe("billing");
+    expect(destination.searchParams.get("callbackUrl")).toBe("/events/42/register?ticket=basic");
+  });
+  it("lets prepared users enter ticket selection directly", async () => {
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1", legalName: "Jane Doe", addressLine1: "Main St 1", addressCity: "Berlin", addressPostalCode: "10115", addressCountry: "DE" } });
+    const res = await profileCompletion(new NextRequest("https://local.dev:3443/events/42/register", { headers: { cookie: "VENTRY.session_token=test" } }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("requests billing details even when the check-in name is already present", async () => {
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1", legalName: "Jane Doe" } });
+    const res = await profileCompletion(new NextRequest("https://local.dev:3443/events/42/register", { headers: { cookie: "VENTRY.session_token=test" } }));
+    expect(new URL(res.headers.get("location")!).searchParams.get("intent")).toBe("billing");
+  });
+
+  it("lets attendees finish without collecting legal or address details", async () => {
+    const res = await POST(postRequest({ username: "attendee-user", path: "ATTENDEE" }));
+    expect(res.status).toBe(200);
+  });
+
+  it("still requires billing identity for organizers", async () => {
+    const res = await POST(postRequest({ path: "ORGANIZER", organizerType: "INDIVIDUAL" }));
+    expect(res.status).toBe(400);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
   it("401s when unauthenticated", async () => {
     mockedGetSession.mockResolvedValue(null);
     const res = await POST(postRequest(VALID_ATTENDEE_BODY));

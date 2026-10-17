@@ -10,7 +10,13 @@ const { db, sendMailMock } = vi.hoisted(() => {
   };
 });
 
-vi.mock('@/lib/prisma/prisma', () => ({ prisma: {}, default: {} }));
+vi.mock('@/lib/prisma/prisma', () => {
+  const prisma = {
+    user: { findFirst: async ({ where }: { where: { username: string } }) => db.user.find(user => user.username === where.username) ?? null },
+    usernameHistory: { findFirst: async () => null },
+  };
+  return { prisma, default: prisma };
+});
 vi.mock('better-auth/adapters/prisma', async () => {
   const { memoryAdapter } = await import('better-auth/adapters/memory');
   return { prismaAdapter: () => memoryAdapter(db) };
@@ -54,6 +60,34 @@ beforeEach(async () => {
 });
 
 describe('Verified email changes', () => {
+  it('creates a minimal account and resumes the original destination after email verification', async () => {
+    const response = await auth.api.signUpEmail({
+      body: { email: 'jane@example.com', name: 'jane-doe', password: 'Cedar9!RiverMosaic27', callbackURL: '/events/42/register' },
+      asResponse: true,
+    });
+    expect(response.status).toBe(200);
+    const mail = sendMailMock.mock.calls.find(([, subject]) => subject === 'Verify Your Email Address - Ventry');
+    const link = new URL(mail![2]);
+    expect(link.searchParams.get('callbackURL')).toBe('/events/42/register');
+    const verified = await auth.handler(new Request(link));
+    expect(verified.headers.get('location')).toBe('/events/42/register');
+    const user = db.user.find(user => user.email === 'jane@example.com');
+    expect(user?.username).toBe('jane-doe');
+    expect(user?.emailVerified).toBe(true);
+    expect(user?.legalName).toBeFalsy();
+  });
+
+  it('limits confirmation resends on the server', async () => {
+    db.user[0].emailVerified = false;
+    const resend = () => auth.handler(new Request(`${BASE_URL}/api/auth/send-verification-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', origin: BASE_URL, 'x-forwarded-for': `192.0.2.${testIP}` },
+      body: JSON.stringify({ email: 'alice@example.com', callbackURL: '/profile' }),
+    }));
+    expect((await resend()).status).toBe(200);
+    expect((await resend()).status).toBe(429);
+  });
+
   it('requires confirmation from both inboxes before updating the email', async () => {
     const response = await requestEmailChange('new@example.com');
     expect(response.status).toBe(200);

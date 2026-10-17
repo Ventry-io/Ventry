@@ -27,7 +27,7 @@ export default function PersonalInfo({
   pronouns,
   age
 }: PersonalInfoProps) {
-  if (!dateOfBirth && !pronouns) {
+  if (!(showAge && age !== null) && !pronouns) {
     return null;
   }
 
@@ -35,6 +35,7 @@ export default function PersonalInfo({
     <Box>
       <Typography
         variant="h6"
+        component="h2"
         gutterBottom
         sx={{
           color: 'primary.main',
@@ -46,7 +47,7 @@ export default function PersonalInfo({
       </Typography>
 
       <Stack spacing={2}>
-        {dateOfBirth && showAge && age !== null && (
+        {showAge && age !== null && (
           <Card variant="outlined">
             <CardContent sx={{ py: 2 }}>
               <Stack direction="row" spacing={2} alignItems="center">
@@ -64,9 +65,10 @@ export default function PersonalInfo({
                   <Typography variant="subtitle1" fontWeight="bold">
                     Age: {age} years old
                   </Typography>
-                  {showExactBirthdate && (
+                  {showExactBirthdate && dateOfBirth && (
                     <Typography variant="body2" color="text.secondary">
                       Born on {dateOfBirth.toLocaleDateString('en-US', {
+                        timeZone: 'UTC',
                         year: 'numeric',
                         month: 'long',
                         day: 'numeric'

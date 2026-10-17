@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_BADGE_TEMPLATE, attendeeInitials, fitBadgeText, getBadgeElementValue, getBadgePhotoUrl, type BadgeAttendee } from "./badge";
-import { badgeTemplateInputSchema } from "@/types/schemas/badge";
+import { DEFAULT_BADGE_TEMPLATE, attendeeInitials, fitBadgeText, getBadgeElementValue, getBadgePhotoUrl, matchesBadgeConditions, normalizeBadgeTemplate, resolveBadgeTemplate, type BadgeAttendee } from "./badge";
+import { badgeConditionSchema, badgeExportSchema, badgeTemplateInputSchema } from "@/types/schemas/badge";
+import { prisma } from "@/lib/prisma/prisma";
 
 vi.mock("@/lib/user/profilePicture", () => ({
   refreshSignedUrls: vi.fn(async pictures => pictures),
@@ -11,6 +12,7 @@ vi.mock("@/lib/prisma/prisma", () => ({
     registration: {
       findMany: vi.fn(),
     },
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -31,7 +33,149 @@ const attendee: BadgeAttendee = {
   },
 };
 
+describe("badge crew schema compatibility", () => {
+  const findMany = prisma.registration.findMany as unknown as ReturnType<typeof vi.fn>;
+  const queryRaw = prisma.$queryRaw as unknown as ReturnType<typeof vi.fn>;
+  const registration = {
+    id: "reg-1", ticketId: 42, status: "CONFIRMED", createdAt: new Date(),
+    customFieldData: {}, preferences: {}, checkedInAt: null, checkInCount: 0,
+    event: { name: "Test", organizationId: "org-1", startDate: new Date(), endDate: new Date() },
+    user: { id: "user-1", name: "Ada", email: "ada@example.com", image: null, legalName: null, isAdmin: true, profilePictures: [] },
+    registrationItems: [],
+  };
+
+  it.each(["role", "departmentId"])("loads event-scoped assignments when the old %s column is absent", async column => {
+    const { loadBadgeAttendees } = await import("./server");
+    findMany.mockReset().mockRejectedValueOnce(Object.assign(new Error(`The column AdminOrganizationMembership.${column} does not exist`), { code: "P2022" }))
+      .mockResolvedValueOnce([registration]);
+    queryRaw.mockReset().mockResolvedValueOnce([{ registrationId: "reg-1", role: "Lead", department: "Operations" }]);
+    const attendees = await loadBadgeAttendees(8, { status: "CONFIRMED" });
+    expect(attendees[0]).toMatchObject({ crewRole: "Lead", crewDepartment: "Operations" });
+    expect(findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { eventId: 8, status: "CONFIRMED" },
+      include: expect.objectContaining({ user: { select: expect.objectContaining({ adminProfile: false }) } }),
+    }));
+    const [sql, eventId] = queryRaw.mock.calls[0];
+    expect(sql.join("?")).toContain('e."organizationId" = m."organizationId"');
+    expect(sql.join("?")).toContain('WHERE a."eventId" = ?');
+    expect(eventId).toBe(8);
+  });
+
+  it("keeps organization-scoped crew working on the original schema", async () => {
+    const { loadBadgeAttendees } = await import("./server");
+    findMany.mockReset().mockResolvedValueOnce([{ ...registration, user: {
+      ...registration.user, adminProfile: { organizationMemberships: [
+        { organizationId: "other-org", role: "Wrong role", department: null },
+        { organizationId: "org-1", role: "Helper", department: { name: "Support" } },
+      ] },
+    } }]);
+    queryRaw.mockReset();
+    expect((await loadBadgeAttendees(8, { status: "CONFIRMED" }))[0]).toMatchObject({ crewRole: "Helper", crewDepartment: "Support" });
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("propagates unrelated database errors", async () => {
+    const { loadBadgeAttendees } = await import("./server");
+    const error = Object.assign(new Error("The column user.username does not exist"), { code: "P2022" });
+    findMany.mockReset().mockRejectedValueOnce(error);
+    queryRaw.mockReset();
+    await expect(loadBadgeAttendees(8, { status: "CONFIRMED" })).rejects.toBe(error);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+});
+
 describe("badge templates", () => {
+  it("matches nested database fields, custom answers, booleans, and numeric comparisons", () => {
+    const sample = { ...attendee, data: { user: { country: "DE", isAdmin: false }, products: [{ name: "Sponsor" }] } };
+    expect(matchesBadgeConditions([
+      { field: "user.country", operator: "equals", value: "DE" },
+      { field: "user.isAdmin", operator: "equals", value: "false" },
+      { field: "products.0.name", operator: "contains", value: "Sponsor" },
+      { field: "customFieldData.helper", operator: "equals", value: "true" },
+      { field: "ticketId", operator: "greaterThan", value: "40" },
+    ], sample)).toBe(true);
+    expect(matchesBadgeConditions([{ field: "ticketId", operator: "lessThan", value: "40" }], sample)).toBe(false);
+    expect(matchesBadgeConditions([{ field: "missing", operator: "notEquals", value: "x" }], sample)).toBe(false);
+    expect(matchesBadgeConditions([{ field: "missing", operator: "isEmpty", value: "" }], sample)).toBe(true);
+    expect(matchesBadgeConditions([{ field: "customFieldData.helper", operator: "isNotEmpty", value: "" }], sample)).toBe(true);
+    expect(matchesBadgeConditions([{ field: "email", operator: "greaterThan", value: "0" }], sample)).toBe(false);
+    expect(matchesBadgeConditions([{ field: "constructor.name", operator: "equals", value: "Object" }], sample)).toBe(false);
+    expect(badgeConditionSchema.safeParse({ field: "__proto__.name", operator: "equals", value: "" }).success).toBe(false);
+  });
+
+  it("uses the first matching background and filters layers without changing the saved design", () => {
+    const conditions = [{ field: "customFieldData.helper", operator: "equals" as const, value: "true" }];
+    const template = {
+      ...DEFAULT_BADGE_TEMPLATE,
+      background: { ...DEFAULT_BADGE_TEMPLATE.background, rules: [
+        { id: "helper", conditions, color: "#fef3c7", imageUrl: null },
+        { id: "later", conditions, color: "#000000" },
+      ] },
+      elements: [
+        { ...DEFAULT_BADGE_TEMPLATE.elements[0], type: "image" as const, imageUrl: "https://cdn.example.com/helper.jpg", conditions },
+        { ...DEFAULT_BADGE_TEMPLATE.elements[1], conditions: [{ ...conditions[0], value: "false" }] },
+      ],
+    };
+    const parsed = badgeTemplateInputSchema.parse(template);
+    const resolved = resolveBadgeTemplate(parsed, attendee);
+    expect(resolved.background.color).toBe("#fef3c7");
+    expect(resolved.background.imageUrl).toBeNull();
+    expect(resolved.elements).toHaveLength(1);
+    expect(resolveBadgeTemplate(parsed, { ...attendee, customFieldData: {} }).background.color).toBe(DEFAULT_BADGE_TEMPLATE.background.color);
+    expect(parsed.elements).toHaveLength(2);
+    const normalized = normalizeBadgeTemplate({ ...parsed, id: "design", eventId: 7 });
+    expect(normalized.background.rules).toEqual(parsed.background.rules);
+    expect(normalized.elements).toEqual(parsed.elements);
+  });
+
+  it("prints multiple designs per attendee in queue order with conditional images", async () => {
+    const { renderPrintableBadgesHtml } = await import("./server");
+    const template = {
+      ...DEFAULT_BADGE_TEMPLATE,
+      elements: [{ ...DEFAULT_BADGE_TEMPLATE.elements[1], type: "staticText" as const, staticText: "FRONT" }],
+    };
+    const back = { ...template, elements: [{ ...template.elements[0], staticText: "BACK" }] };
+    const html = renderPrintableBadgesHtml(template, [attendee, { ...attendee, ticketId: 43 }], 7, "single", [back, back]);
+    expect(html.match(/class="badge"/g)).toHaveLength(6);
+    expect([...html.matchAll(/>(FRONT|BACK)<\/div>/g)].map(match => match[1])).toEqual(["FRONT", "BACK", "BACK", "FRONT", "BACK", "BACK"]);
+    expect(html).toContain("break-after:page");
+    expect(badgeExportSchema.safeParse({ template, attendeeIds: [attendee.id], additionalTemplates: Array(10).fill(back) }).success).toBe(false);
+    const image = { ...template.elements[0], type: "image" as const, imageUrl: 'https://cdn.example.com/helper.jpg', conditions: [{ field: "customFieldData.helper", operator: "equals" as const, value: "true" }] };
+    const matching = renderPrintableBadgesHtml({ ...template, elements: [image] }, [attendee], 7, "sheet");
+    const other = renderPrintableBadgesHtml({ ...template, elements: [image] }, [{ ...attendee, customFieldData: {} }], 7, "sheet");
+    expect(matching).toContain('src="https://cdn.example.com/helper.jpg"');
+    expect(other).not.toContain("helper.jpg");
+  });
+
+  it("renders conditional uploaded images in PNG and rejects arbitrary server fetches", async () => {
+    const sharp = (await import("sharp")).default;
+    const { renderBadgePng, BadgeImageError } = await import("./server");
+    const previousUrl = process.env.SUPABASE_URL;
+    process.env.SUPABASE_URL = "https://storage.example.com";
+    const source = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#ff0000" } }).png().toBuffer();
+    const fetchMock = vi.fn(async () => new Response(source));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const template = {
+        ...DEFAULT_BADGE_TEMPLATE, widthMm: 20, heightMm: 20,
+        background: { ...DEFAULT_BADGE_TEMPLATE.background, rules: [{ id: "red", conditions: [{ field: "ticketId", operator: "equals" as const, value: "42" }], imageUrl: "https://storage.example.com/storage/v1/object/public/banners/red.png" }] },
+        elements: [],
+      };
+      const png = await renderBadgePng(template, attendee, 7);
+      const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      expect(info.width).toBe(Math.round(20 * 4 * 3.78));
+      expect([...data.subarray(0, 3)]).toEqual([255, 0, 0]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await expect(renderBadgePng({ ...template, background: { ...template.background, rules: [], imageUrl: "http://127.0.0.1/private" } }, attendee, 7)).rejects.toBeInstanceOf(BadgeImageError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousUrl === undefined) Reflect.deleteProperty(process.env, "SUPABASE_URL");
+      else process.env.SUPABASE_URL = previousUrl;
+    }
+  });
+
   it("validates the default badge template", () => {
     expect(badgeTemplateInputSchema.safeParse(DEFAULT_BADGE_TEMPLATE).success).toBe(true);
   });
@@ -144,6 +288,7 @@ describe("badge templates", () => {
           fit: "cover",
           positionX: 25,
           positionY: 75,
+          fallbackPhotoUrls: [],
         },
       },
       [attendee],

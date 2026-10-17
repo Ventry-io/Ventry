@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Box,
   Card,
@@ -9,7 +11,13 @@ import {
   Chip,
   Stack,
   Alert,
-  Divider
+  Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  IconButton,
+  Tooltip,
 } from "@mui/material";
 import {
   GitHub,
@@ -17,19 +25,52 @@ import {
   Email,
   Add,
   CheckCircle,
+  LinkOff,
+  Info,
   Link as LinkIcon
 } from "@mui/icons-material";
 import PasskeyManager from "./PasskeyManager";
+import ForgotPassword from "@/components/auth/ForgotPassword";
+import authClient from "@/lib/auth/client";
 
 interface LinkedAccountsProps {
   accounts: Array<{
+    accountId: string;
     providerId: string;  // Changed from 'provider' for better-auth
   }>;
   hasPassword: boolean;
-  hasOAuthProviders: boolean;
 }
 
-export default function LinkedAccounts({ accounts, hasPassword, hasOAuthProviders }: LinkedAccountsProps) {
+export default function LinkedAccounts({ accounts, hasPassword }: LinkedAccountsProps) {
+  const router = useRouter();
+  const [removedAccounts, setRemovedAccounts] = useState<string[]>([]);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<LinkedAccountsProps['accounts'][number] | null>(null);
+  const linkedAccounts = accounts.filter(account => !removedAccounts.includes(`${account.providerId}:${account.accountId}`));
+  const hasOAuthProviders = linkedAccounts.some(account => !['credential', 'credentials'].includes(account.providerId));
+
+  const handleUnlink = async (account: LinkedAccountsProps['accounts'][number]) => {
+    const key = `${account.providerId}:${account.accountId}`;
+    setRemoving(key);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await authClient.unlinkAccount({ providerId: account.providerId, accountId: account.accountId });
+      if (result.error) throw new Error(result.error.message || 'Failed to remove linked account.');
+      setRemovedAccounts(previous => [...previous, key]);
+      setSelectedAccount(null);
+      setSuccess(`${getProviderName(account.providerId)} account removed.`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove linked account.');
+    } finally {
+      setRemoving(null);
+    }
+  };
+
   const getProviderIcon = (providerId: string) => {
     switch (providerId) {
       case "github":
@@ -63,7 +104,7 @@ export default function LinkedAccounts({ accounts, hasPassword, hasOAuthProvider
     { id: "google", name: "Google", icon: <Google /> }
   ];
 
-  const linkedProviders = accounts.map(a => a.providerId);
+  const linkedProviders = linkedAccounts.map(a => a.providerId);
   
   const unlinkableProviders = availableProviders.filter(
     p => !linkedProviders.includes(p.id)
@@ -89,8 +130,17 @@ export default function LinkedAccounts({ accounts, hasPassword, hasOAuthProvider
         </Typography>
 
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Manage how you sign in to your account. You can link multiple providers.
+          Manage how you sign in to your account. Email sign-in is required; other accounts can be removed.
         </Typography>
+
+        {error && !selectedAccount && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+        {!hasPassword && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            Set an email password before removing linked accounts.
+            <Button size="small" onClick={() => setPasswordDialogOpen(true)}>Set Password</Button>
+          </Alert>
+        )}
 
         {!hasPassword && !hasOAuthProviders && linkedProviders.length > 0 && (
           <Alert severity="warning" sx={{ mb: 2 }}>
@@ -112,9 +162,9 @@ export default function LinkedAccounts({ accounts, hasPassword, hasOAuthProvider
           </Alert>
         ) : (
           <Stack spacing={1} sx={{ mb: 3 }}>
-            {linkedProviders.map((providerId) => (
+            {linkedAccounts.map(({ providerId, accountId }) => (
               <Box
-                key={providerId}
+                key={`${providerId}:${accountId}`}
                 sx={{
                   display: "flex",
                   alignItems: "center",
@@ -132,12 +182,25 @@ export default function LinkedAccounts({ accounts, hasPassword, hasOAuthProvider
                     {getProviderName(providerId)}
                   </Typography>
                 </Box>
-                <Chip
-                  icon={<CheckCircle />}
-                  label="Linked"
-                  color="success"
-                  size="small"
-                />
+                <Stack direction="row" spacing={1} alignItems="center">
+                  {['credential', 'credentials'].includes(providerId) && (
+                    <Chip icon={<CheckCircle />} label="Required" color="success" size="small" />
+                  )}
+                  <Tooltip title="Details">
+                    <IconButton
+                      size="small"
+                      aria-label={`Manage ${getProviderName(providerId)} account`}
+                      disabled={removing !== null}
+                      onClick={() => {
+                        setSelectedAccount({ providerId, accountId });
+                        setError(null);
+                        setSuccess(null);
+                      }}
+                    >
+                      <Info fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
               </Box>
             ))}
           </Stack>
@@ -176,7 +239,7 @@ export default function LinkedAccounts({ accounts, hasPassword, hasOAuthProvider
                     variant="outlined"
                     startIcon={<Add />}
                     onClick={() => void handleLinkProvider(provider.id)}
-                    disabled={!hasPassword && !hasOAuthProviders}
+                    disabled={removing !== null || (!hasPassword && !hasOAuthProviders)}
                   >
                     Link
                   </Button>
@@ -190,13 +253,48 @@ export default function LinkedAccounts({ accounts, hasPassword, hasOAuthProvider
 
         <PasskeyManager />
 
-        {!hasPassword && hasOAuthProviders && (
-          <Alert severity="info" sx={{ mt: 2 }}>
-            <Typography variant="caption">
-              You currently sign in using OAuth only. Consider setting a password as a backup login method.
-            </Typography>
-          </Alert>
-        )}
+        <Dialog open={selectedAccount !== null} onClose={() => { if (!removing) setSelectedAccount(null); }} fullWidth maxWidth="sm">
+          <DialogTitle>Linked Account Details</DialogTitle>
+          <DialogContent>
+            {selectedAccount && (
+              <Stack spacing={2} sx={{ pt: 1 }}>
+                {error && <Alert severity="error">{error}</Alert>}
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Provider</Typography>
+                  <Typography variant="body2">{getProviderName(selectedAccount.providerId)}</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">Account ID</Typography>
+                  <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{selectedAccount.accountId}</Typography>
+                </Box>
+                {['credential', 'credentials'].includes(selectedAccount.providerId) ? (
+                  <Alert severity="info">Email sign-in is required and cannot be removed.</Alert>
+                ) : !hasPassword ? (
+                  <Alert severity="info">Set an email password before removing linked accounts.</Alert>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Removing this account disables sign-in with this linked account. Your Ventry account and email sign-in remain available.
+                  </Typography>
+                )}
+              </Stack>
+            )}
+          </DialogContent>
+          <DialogActions sx={{ justifyContent: 'space-between' }}>
+            {selectedAccount && !['credential', 'credentials'].includes(selectedAccount.providerId) && (
+              <Button
+                color="error"
+                startIcon={<LinkOff />}
+                disabled={!hasPassword || removing !== null}
+                onClick={() => void handleUnlink(selectedAccount)}
+              >
+                {removing ? 'Removing...' : 'Remove'}
+              </Button>
+            )}
+            <Button onClick={() => setSelectedAccount(null)} disabled={removing !== null} sx={{ ml: 'auto' }}>Close</Button>
+          </DialogActions>
+        </Dialog>
+
+        <ForgotPassword open={passwordDialogOpen} onClose={() => setPasswordDialogOpen(false)} />
       </CardContent>
     </Card>
   );

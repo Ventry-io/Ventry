@@ -1,10 +1,10 @@
-import sharp from "sharp";
+import sharp, { type FitEnum } from "sharp";
 
 export interface JpegCompressionAttempt {
   quality: number;
   width: number;
   height?: number;
-  fit?: keyof sharp.FitEnum;
+  fit?: keyof FitEnum;
 }
 
 export interface JpegCompressionResult {

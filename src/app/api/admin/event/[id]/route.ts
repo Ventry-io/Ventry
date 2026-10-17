@@ -51,7 +51,7 @@ export async function PATCH(
         const id = Number((await params).id);
         if (Number.isNaN(id)) return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
-        const authResult = await checkEventAdminAuth(id);
+        const authResult = await checkEventAdminAuth(id, req.headers, undefined, true);
         if (!authResult.authorized) {
             return forbiddenResponse(authResult.error);
         }
@@ -114,14 +114,14 @@ export async function PATCH(
 
 // DELETE /api/admin/event/[id] - Delete an event
 export async function DELETE(
-    _req: NextRequest,
+    req: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const id = Number((await params).id);
         if (Number.isNaN(id)) return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
-        const authResult = await checkEventAdminAuth(id);
+        const authResult = await checkEventAdminAuth(id, req.headers, undefined, true);
         if (!authResult.authorized) {
             return forbiddenResponse(authResult.error);
         }

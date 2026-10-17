@@ -52,6 +52,7 @@ import { calculateRealisticAge, getBirthDateBounds } from '@/lib/user/birthdate'
 import { diffPayload } from '@/lib/diffPayload';
 import authClient from '@/lib/auth/client';
 import { notifyProfilePictureChanged } from '@/lib/user/profilePictureEvents';
+import { hasCheckInIdentity, hasBillingAddress } from '@/lib/user/profile-completion';
 
 interface ProfilePicture {
   id: string;
@@ -92,6 +93,7 @@ interface User {
   name?: string | null;
   username?: string | null;
   email: string;
+  emailVerified?: boolean;
   country?: string | null;
   legalName?: string | null;
   addressLine1?: string | null;
@@ -102,6 +104,7 @@ interface User {
   addressCountry?: string | null;
   profilePictures: ProfilePicture[];
   accounts: Array<{
+    id: string;
     accountId: string;
     providerId: string;
     password?: string | null;
@@ -120,6 +123,7 @@ interface User {
 interface ProfilePageClientProps {
   user: User;
   isOrganization?: boolean;
+  isOrganizer?: boolean;
 }
 
 interface ProfileFormData {
@@ -221,7 +225,8 @@ const sectionSx = {
   bgcolor: 'background.paper',
 };
 
-export default function ProfilePageClient({ user, isOrganization = false }: ProfilePageClientProps) {
+export default function ProfilePageClient({ user, isOrganization = false, isOrganizer = false }: ProfilePageClientProps) {
+  const [readiness, setReadiness] = useState(() => ({ checkIn: hasCheckInIdentity(user), billing: hasBillingAddress(user) }));
   const theme = useTheme();
   const desktop = useMediaQuery(theme.breakpoints.up('md'));
   const [activeTab, setActiveTab] = useState('general');
@@ -454,6 +459,7 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
       }
 
       baselinePayloadRef.current = payload;
+      setReadiness({ checkIn: hasCheckInIdentity(payload), billing: hasBillingAddress(payload) });
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err) {
@@ -528,13 +534,9 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
   const displayedAge = formData.dateOfBirth ? calculateRealisticAge(formData.dateOfBirth) : null;
   const displayNameLength = formData.name.length;
   const displayNameTooLong = displayNameLength > DISPLAY_NAME_MAX_LENGTH;
-  const hasCheckInIdentity = Boolean(
-    formData.legalName ||
-    formData.addressLine1 ||
-    formData.addressCity ||
-    formData.addressPostalCode ||
-    formData.addressCountry
-  );
+  const checkInReady = hasCheckInIdentity(formData);
+  const identityReady = checkInReady && hasBillingAddress(formData);
+  const hasIdentityDetails = Object.values({ name: formData.legalName, address: formData.addressLine1, city: formData.addressCity, postal: formData.addressPostalCode, country: formData.addressCountry }).some(Boolean);
 
   return (
     <Stack spacing={2.5}>
@@ -553,6 +555,29 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
       {linkSuccess && (
         <Alert severity="success" onClose={() => setLinkSuccess(false)}>
           Account linked successfully!
+        </Alert>
+      )}
+
+      <Stack spacing={1} sx={{ pb: 1 }}>
+        <Typography variant="subtitle2">Account readiness</Typography>
+        <Stack direction="row" gap={1} flexWrap="wrap">
+          <Chip size="small" variant="outlined" color={user.emailVerified ? "success" : "default"}
+            label={user.emailVerified ? "Email verified" : "Verify email"}
+            component="a" clickable href={user.emailVerified ? "/profile?tab=auth" : `/check-email?email=${encodeURIComponent(user.email)}&callbackUrl=%2Fprofile`} />
+          <Chip size="small" variant="outlined" color={readiness.checkIn ? "success" : "default"}
+            label={readiness.checkIn ? "Check-in ready" : "Add check-in name"}
+            onClick={() => setActiveTab('personal')} />
+          <Chip size="small" variant="outlined" color={readiness.billing ? "success" : "warning"}
+            label={readiness.billing ? "Billing details added" : "Add billing address"}
+            onClick={() => setActiveTab('personal')} />
+          {!isOrganizer && <Chip size="small" variant="outlined" label="Set up as organizer" component="a" clickable href="/complete-profile?intent=organizer&callbackUrl=%2Fadmin" />}
+        </Stack>
+        <Typography variant="body2" color="text.secondary">Your photo, bio and pronouns are optional. Check-in details are private.</Typography>
+      </Stack>
+
+      {(!readiness.checkIn || !readiness.billing) && (
+        <Alert severity="warning" action={<Button color="inherit" size="small" href="/complete-profile?intent=billing&callbackUrl=%2Fprofile">Complete now</Button>}>
+          Complete your legal name and billing address before ticket sales open to avoid delays when booking. Your details are private.
         </Alert>
       )}
 
@@ -691,13 +716,13 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
                             <Typography variant="body2" color="text.secondary">
                               {isOrganization
                                 ? "Legal name and address of your organization."
-                                : "Legal name and address for on-site verification."}
+                                : "Your legal name and billing address are required before booking a ticket. These details are private."}
                             </Typography>
                           </Box>
                           <Chip
-                            label={hasCheckInIdentity ? 'Added' : 'Empty'}
+                            label={identityReady ? 'Complete' : hasIdentityDetails ? 'Incomplete' : 'Not added'}
                             size="small"
-                            color={hasCheckInIdentity ? 'success' : 'default'}
+                            color={identityReady ? 'success' : hasIdentityDetails ? 'warning' : 'default'}
                             sx={{ flexShrink: 0 }}
                           />
                         </Stack>
@@ -705,7 +730,7 @@ export default function ProfilePageClient({ user, isOrganization = false }: Prof
                       <AccordionDetails>
                         <Stack spacing={2.5}>
                           <Alert severity="info">
-                            This information is used for event check-in and is not shown on your public profile.
+                            This information is used for ticket billing and event check-in. It is not shown on your public profile.
                           </Alert>
 
                           <TextField

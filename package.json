@@ -10,9 +10,9 @@
   "engineStrict": true,
   "scripts": {
     "dev:nossl": "next dev -H 127.0.0.1 -p 3000",
-    "dev": "npm run dev:db && REDIS_URL=redis://127.0.0.1:6380 npm run dev:ventry",
-    "dev:run": "next dev -H local.dev -p 3443 --experimental-https --experimental-https-key=certs/dev-local-key.pem --experimental-https-cert=certs/dev-local.pem",
-    "dev:ventry": "BETTER_AUTH_URL=https://ventry.localhost:3443 NEXTAUTH_URL=https://ventry.localhost:3443 DEV_URL=https://ventry.localhost:3443 next dev -H ventry.localhost -p 3443 --experimental-https --experimental-https-key=certs/dev-local-key.pem --experimental-https-cert=certs/dev-local.pem",
+    "dev": "npm run dev:db && REDIS_URL=redis://127.0.0.1:6380 npm run dev:run",
+    "dev:run": "BETTER_AUTH_URL=\"https://${DEV_HOST:-local.dev}:3443\" NEXTAUTH_URL=\"https://${DEV_HOST:-local.dev}:3443\" DEV_URL=\"https://${DEV_HOST:-local.dev}:3443\" next dev -H \"${DEV_HOST:-local.dev}\" -p 3443 --experimental-https --experimental-https-key=certs/dev-local-key.pem --experimental-https-cert=certs/dev-local.pem",
+    "dev:ventry": "DEV_HOST=ventry.localhost npm run dev",
     "dev:db": "docker compose -f .docker/docker-compose.local.yml up -d --wait --wait-timeout 60 --quiet-pull",
     "build": "next build",
     "build:docker": "next build",
@@ -34,7 +34,7 @@
     "db:migrate": "./scripts/prisma-migrate-dev.mjs"
   },
   "dependencies": {
-    "@better-auth/passkey": "^1.6.23",
+    "@better-auth/passkey": "^1.7.10",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -64,7 +64,7 @@
     "@types/pg": "^8.20.0",
     "@zxing/browser": "^0.2.0",
     "bcrypt": "^6.0.0",
-    "better-auth": "^1.6.23",
+    "better-auth": "^1.7.10",
     "ioredis": "^6.0.0",
     "jotai": "^2.15.0",
     "jsonwebtoken": "^9.0.2",

@@ -50,6 +50,29 @@ beforeEach(() => {
 });
 
 describe("Profile settings tabs", () => {
+  it("warns attendees about missing billing details before ticket sales", () => {
+    render(<ProfilePageClient user={BASE_USER} />);
+    expect(screen.getByText(/Complete your legal name and billing address before ticket sales open/)).toBeInTheDocument();
+    expect(screen.getByText("Add billing address")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Complete now" })).toHaveAttribute("href", "/complete-profile?intent=billing&callbackUrl=%2Fprofile");
+  });
+
+  it("hides the booking warning for saved, complete details", () => {
+    render(<ProfilePageClient user={{ ...BASE_USER, legalName: "Jane Doe", addressLine1: "Main St 1", addressCity: "Berlin", addressPostalCode: "10115", addressCountry: "DE" }} />);
+    expect(screen.queryByText(/Complete your legal name and billing address before ticket sales open/)).not.toBeInTheDocument();
+    expect(screen.getByText("Billing details added")).toBeInTheDocument();
+  });
+
+  it("marks check-in ready only after saving a legal name, without requiring an address", async () => {
+    setupFetch();
+    render(<ProfilePageClient user={BASE_USER} />);
+    fireEvent.click(screen.getByText('Add check-in name'));
+    fireEvent.click(screen.getByRole('button', { name: /Check-in Identity/ }));
+    fireEvent.change(screen.getByLabelText('Legal Name'), { target: { value: 'Jane Doe' } });
+    expect(screen.queryByText('Check-in ready')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await screen.findByText('Check-in ready');
+  });
   it("defaults cons to private and saves the public visibility choice", async () => {
     const fetchMock = setupFetch();
     render(<ProfilePageClient user={BASE_USER} />);

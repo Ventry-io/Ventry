@@ -3,13 +3,15 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma/prisma";
 import { auth } from "@/app/api/auth/auth";
 import { AdminType } from "@/generated/prisma";
-import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
+import { usernameSchema } from "@/types/schemas/signup";
 import { requiredCountryCodeSchema } from "@/types/schemas/country";
+import { getCallbackPath } from "@/lib/auth/callback";
 
 const schema = z
   .object({
     email: z.string().trim().email(),
-    username: z.string().trim().min(3).max(DISPLAY_NAME_MAX_LENGTH),
+    callbackURL: z.string().max(2048).optional(),
+    username: usernameSchema,
     password: z
       .string()
       .min(8)
@@ -86,6 +88,7 @@ export async function POST(req: NextRequest) {
       email: data.email,
       name: data.username,
       password: data.password,
+      callbackURL: `/complete-profile?intent=organizer&callbackUrl=${encodeURIComponent(getCallbackPath(data.callbackURL))}`,
       legalName: data.legalName,
       addressLine1: data.addressLine1,
       addressLine2: data.addressLine2 ?? null,
@@ -104,33 +107,40 @@ export async function POST(req: NextRequest) {
   const userId = signUpResult.user.id;
 
   // Create admin profile + optionally organization in a single transaction
-  await prisma.$transaction(async (tx) => {
-    await tx.user.update({
-      where: { id: userId },
-      data: { isAdmin: true },
-    });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { isAdmin: true },
+      });
 
-    const admin = await tx.admin.create({
-      data: {
-        userId,
-        type: data.organizerType === "INDIVIDUAL" ? AdminType.INDIVIDUAL : AdminType.ORGANIZATION,
-      },
-    });
-
-    if (data.organizerType === "ORGANIZATION" && data.orgName && data.orgSlug) {
-      await tx.adminOrganization.create({
+      const admin = await tx.admin.create({
         data: {
-          name: data.orgName,
-          slug: data.orgSlug,
-          description: data.orgDescription ?? null,
-          ownerId: admin.id,
-          members: {
-            create: { adminId: admin.id, permissions: [] },
-          },
+          userId,
+          type: data.organizerType === "INDIVIDUAL" ? AdminType.INDIVIDUAL : AdminType.ORGANIZATION,
         },
       });
-    }
-  });
+
+      if (data.organizerType === "ORGANIZATION" && data.orgName && data.orgSlug) {
+        await tx.adminOrganization.create({
+          data: {
+            name: data.orgName,
+            slug: data.orgSlug,
+            description: data.orgDescription ?? null,
+            ownerId: admin.id,
+            members: {
+              create: { adminId: admin.id, permissions: [] },
+            },
+          },
+        });
+      }
+    });
+  } catch (error) {
+    // The account and verification email already exist. Resume setup after
+    // verification rather than asking the user to create the account again.
+    console.error("Organizer setup deferred until email verification:", error);
+    return NextResponse.json({ success: true, organizerSetupPending: true }, { status: 201 });
+  }
 
   return NextResponse.json({ success: true }, { status: 201 });
 }

@@ -10,7 +10,13 @@ const { db, sendMailMock } = vi.hoisted(() => {
   };
 });
 
-vi.mock('@/lib/prisma/prisma', () => ({ prisma: {}, default: {} }));
+vi.mock('@/lib/prisma/prisma', () => {
+  const prisma = {
+    user: { findFirst: async ({ where }: { where: { username: string } }) => db.user.find(user => user.username === where.username) ?? null },
+    usernameHistory: { findFirst: async () => null },
+  };
+  return { prisma, default: prisma };
+});
 vi.mock('better-auth/adapters/prisma', async () => {
   const { memoryAdapter } = await import('better-auth/adapters/memory');
   return { prismaAdapter: () => memoryAdapter(db) };
@@ -53,7 +59,55 @@ beforeEach(async () => {
   cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
 });
 
+describe('Better Auth 1.7 compatibility', () => {
+  it('keeps billing addresses out of session responses', async () => {
+    Object.assign(db.user[0], { legalName: 'Alice Example', addressLine1: 'Main St 1', addressCity: 'Berlin', addressPostalCode: '10115', addressCountry: 'DE' });
+    const session = await auth.api.getSession({ headers: new Headers({ cookie }) });
+    expect(session?.user.legalName).toBe('Alice Example');
+    for (const field of ['addressLine1', 'addressLine2', 'addressCity', 'addressState', 'addressPostalCode', 'addressCountry']) {
+      expect(session?.user).not.toHaveProperty(field);
+    }
+  });
+
+  it('leaves provider identity to Better Auth while preserving profile suggestions', async () => {
+    const google = await auth.options.socialProviders.google.mapProfileToUser({ sub: 'google-subject', name: 'Alice Example', email: 'alice@example.com', picture: 'https://example.com/avatar.png', email_verified: true } as never);
+    const github = await auth.options.socialProviders.github.mapProfileToUser({ id: 42, login: 'alice', name: 'Alice Example', email: 'alice@example.com', avatar_url: 'https://example.com/avatar.png' } as never);
+    for (const profile of [google, github]) {
+      expect(profile).not.toHaveProperty('id');
+      expect(profile).toMatchObject({ name: 'Alice Example', oauthLegalNameSuggestion: 'Alice Example' });
+    }
+  });
+});
+
 describe('Verified email changes', () => {
+  it('creates a minimal account and resumes the original destination after email verification', async () => {
+    const response = await auth.api.signUpEmail({
+      body: { email: 'jane@example.com', name: 'jane-doe', password: 'Cedar9!RiverMosaic27', callbackURL: '/events/42/register' },
+      asResponse: true,
+    });
+    expect(response.status).toBe(200);
+    const mail = sendMailMock.mock.calls.find(([, subject]) => subject === 'Verify Your Email Address - Ventry');
+    const link = new URL(mail![2]);
+    expect(link.searchParams.get('callbackURL')).toBe('/events/42/register');
+    const verified = await auth.handler(new Request(link));
+    expect(verified.headers.get('location')).toBe('/events/42/register');
+    const user = db.user.find(user => user.email === 'jane@example.com');
+    expect(user?.username).toBe('jane-doe');
+    expect(user?.emailVerified).toBe(true);
+    expect(user?.legalName).toBeFalsy();
+  });
+
+  it('limits confirmation resends on the server', async () => {
+    db.user[0].emailVerified = false;
+    const resend = () => auth.handler(new Request(`${BASE_URL}/api/auth/send-verification-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', origin: BASE_URL, 'x-forwarded-for': `192.0.2.${testIP}` },
+      body: JSON.stringify({ email: 'alice@example.com', callbackURL: '/profile' }),
+    }));
+    expect((await resend()).status).toBe(200);
+    expect((await resend()).status).toBe(429);
+  });
+
   it('requires confirmation from both inboxes before updating the email', async () => {
     const response = await requestEmailChange('new@example.com');
     expect(response.status).toBe(200);
@@ -103,11 +157,11 @@ function addOAuthAccount(providerId: string, accountId = `${providerId}-1`, user
   db.account.push({ id: `${userId}-${accountId}`, providerId, accountId, userId, createdAt: new Date(), updatedAt: new Date() });
 }
 
-function unlink(providerId: string, accountId?: string, sessionCookie = cookie) {
+function unlink(accountId: string, sessionCookie = cookie) {
   return auth.handler(new Request(`${BASE_URL}/api/auth/unlink-account`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', origin: BASE_URL, cookie: sessionCookie, 'x-forwarded-for': `192.0.2.${testIP}` },
-    body: JSON.stringify({ providerId, accountId }),
+    body: JSON.stringify({ accountId }),
   }));
 }
 
@@ -115,25 +169,34 @@ describe('Unlinking accounts', () => {
   it('removes every external account while preserving email sign-in', async () => {
     addOAuthAccount('google');
     addOAuthAccount('github');
-    expect((await unlink('google', 'google-1')).status).toBe(200);
-    expect((await unlink('github', 'github-1')).status).toBe(200);
+    expect((await unlink('user-1-google-1')).status).toBe(200);
+    expect((await unlink('user-1-github-1')).status).toBe(200);
     expect(db.account).toHaveLength(1);
     expect(db.account[0].providerId).toBe('credential');
     expect(db.account[0].password).toBeTruthy();
     expect(db.user[0].email).toBe('alice@example.com');
   });
 
-  it.each(['credential', 'credentials'])('rejects direct requests to unlink %s', async providerId => {
+  it('rejects direct requests to unlink the credential account by its local ID', async () => {
     addOAuthAccount('google');
-    expect((await unlink(providerId)).status).toBe(400);
+    expect((await unlink('account-1')).status).toBe(400);
     expect(db.account).toHaveLength(2);
     expect(db.account[0].providerId).toBe('credential');
+  });
+
+  it('rejects provider-side identifiers and removes only the selected local account', async () => {
+    addOAuthAccount('google', 'first-google');
+    addOAuthAccount('google', 'second-google');
+    expect((await unlink('first-google')).status).toBe(400);
+    expect(db.account).toHaveLength(3);
+    expect((await unlink('user-1-first-google')).status).toBe(200);
+    expect(db.account.map(account => account.accountId)).toEqual(['user-1', 'second-google']);
   });
 
   it('requires a usable email password before unlinking OAuth accounts', async () => {
     db.account[0].password = null;
     addOAuthAccount('google');
-    const response = await unlink('google');
+    const response = await unlink('user-1-google-1');
     expect(response.status).toBe(400);
     expect((await response.json()).message).toBe('Set an email password before removing linked accounts.');
     expect(db.account).toHaveLength(2);
@@ -141,14 +204,14 @@ describe('Unlinking accounts', () => {
 
   it('never removes another user’s linked account', async () => {
     addOAuthAccount('google', 'other-google', 'user-2');
-    expect((await unlink('google', 'other-google')).status).toBe(400);
+    expect((await unlink('user-2-other-google')).status).toBe(400);
     expect(db.account).toHaveLength(2);
   });
 
   it('lets OAuth-only users establish email sign-in through password reset, then unlink OAuth', async () => {
     db.account.length = 0;
     addOAuthAccount('google');
-    expect((await unlink('google')).status).toBe(400);
+    expect((await unlink('user-1-google-1')).status).toBe(400);
     await auth.api.requestPasswordReset({ body: { email: 'alice@example.com', redirectTo: '/reset-password' } });
     expect(sendMailMock).toHaveBeenCalledWith('alice@example.com', 'Reset Your Password', expect.any(String));
     const verification = db.verification.find(row => String(row.identifier).startsWith('reset-password:'));
@@ -160,16 +223,16 @@ describe('Unlinking accounts', () => {
     });
     expect(login.status).toBe(200);
     cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
-    expect((await unlink('google')).status).toBe(200);
+    expect((await unlink('user-1-google-1')).status).toBe(200);
     expect(db.account).toHaveLength(1);
     expect(db.account[0].providerId).toBe('credential');
   });
 
   it('rejects unauthenticated and stale sessions', async () => {
     addOAuthAccount('google');
-    expect((await unlink('google', undefined, '')).status).toBe(401);
+    expect((await unlink('user-1-google-1', '')).status).toBe(401);
     db.session[0].createdAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-    expect((await unlink('google')).status).toBe(403);
+    expect((await unlink('user-1-google-1')).status).toBe(403);
     expect(db.account).toHaveLength(2);
   });
 });

@@ -35,6 +35,7 @@ import authClient from "@/lib/auth/client";
 
 interface LinkedAccountsProps {
   accounts: Array<{
+    id: string;
     accountId: string;
     providerId: string;  // Changed from 'provider' for better-auth
   }>;
@@ -58,7 +59,7 @@ export default function LinkedAccounts({ accounts, hasPassword }: LinkedAccounts
     setError(null);
     setSuccess(null);
     try {
-      const result = await authClient.unlinkAccount({ providerId: account.providerId, accountId: account.accountId });
+      const result = await authClient.unlinkAccount({ accountId: account.id });
       if (result.error) throw new Error(result.error.message || 'Failed to remove linked account.');
       setRemovedAccounts(previous => [...previous, key]);
       setSelectedAccount(null);
@@ -162,7 +163,7 @@ export default function LinkedAccounts({ accounts, hasPassword }: LinkedAccounts
           </Alert>
         ) : (
           <Stack spacing={1} sx={{ mb: 3 }}>
-            {linkedAccounts.map(({ providerId, accountId }) => (
+            {linkedAccounts.map(({ id, providerId, accountId }) => (
               <Box
                 key={`${providerId}:${accountId}`}
                 sx={{
@@ -192,7 +193,7 @@ export default function LinkedAccounts({ accounts, hasPassword }: LinkedAccounts
                       aria-label={`Manage ${getProviderName(providerId)} account`}
                       disabled={removing !== null}
                       onClick={() => {
-                        setSelectedAccount({ providerId, accountId });
+                        setSelectedAccount({ id, providerId, accountId });
                         setError(null);
                         setSuccess(null);
                       }}

@@ -2,6 +2,11 @@ import { z } from "zod";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
 import { optionalCountryCodeSchema } from "@/types/schemas/country";
 
+export const usernameSchema = z.string().trim()
+  .min(3, "Use at least 3 characters")
+  .max(DISPLAY_NAME_MAX_LENGTH, `Use at most ${DISPLAY_NAME_MAX_LENGTH} characters`)
+  .regex(/^[\p{L}\p{N}_.-]+$/u, "Use letters, numbers, dots, hyphens or underscores");
+
 // Guards the actual write boundary (better-auth's /sign-up/email), since
 // client-side schemas only validate whichever form happened to submit the
 // request and can be bypassed entirely.

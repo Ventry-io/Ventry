@@ -8,9 +8,9 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: refreshMock }) 
 vi.mock('./PasskeyManager', () => ({ default: () => null }));
 
 const accounts = [
-  { providerId: 'credential', accountId: 'email-1' },
-  { providerId: 'google', accountId: 'google-1' },
-  { providerId: 'github', accountId: 'github-1' },
+  { id: 'local-email-1', providerId: 'credential', accountId: 'email-1' },
+  { id: 'local-google-1', providerId: 'google', accountId: 'google-1' },
+  { id: 'local-github-1', providerId: 'github', accountId: 'github-1' },
 ];
 
 beforeEach(() => {
@@ -31,7 +31,7 @@ describe('Linked accounts', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
       expect(screen.queryByRole('button', { name: `Manage ${name} account` })).not.toBeInTheDocument();
-      expect(unlinkMock).toHaveBeenLastCalledWith({ providerId, accountId: `${providerId}-1` });
+      expect(unlinkMock).toHaveBeenLastCalledWith({ accountId: `local-${providerId}-1` });
     }
     expect(refreshMock).toHaveBeenCalledTimes(2);
     expect(screen.getByText('Email & Password')).toBeInTheDocument();
@@ -39,12 +39,12 @@ describe('Linked accounts', () => {
   });
 
   it('removes only the selected account when a provider is linked twice', async () => {
-    render(<LinkedAccounts accounts={[accounts[0], accounts[2], { providerId: 'github', accountId: 'github-2' }]} hasPassword />);
+    render(<LinkedAccounts accounts={[accounts[0], accounts[2], { id: 'local-github-2', providerId: 'github', accountId: 'github-2' }]} hasPassword />);
     fireEvent.click(screen.getAllByRole('button', { name: 'Manage GitHub account' })[0]);
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.getAllByRole('button', { name: 'Manage GitHub account' })).toHaveLength(1);
-    expect(unlinkMock).toHaveBeenCalledWith({ providerId: 'github', accountId: 'github-1' });
+    expect(unlinkMock).toHaveBeenCalledWith({ accountId: 'local-github-1' });
   });
 
   it.each(['api', 'network'])('retains the account after an %s error', async kind => {

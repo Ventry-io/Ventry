@@ -36,8 +36,9 @@ import {
 } from "@mui/icons-material";
 import Image from "next/image";
 import QRCode from "react-qr-code";
+import BadgeConditions from "./BadgeConditions";
 import ImageCropper from "@/components/profile/ImageCropper";
-import { attendeeInitials, fitBadgeText, getBadgeElementValue, getBadgePhotoUrl, type BadgeAttendee, type BadgeTemplate } from "@/lib/badges/badge";
+import { attendeeInitials, fitBadgeText, getBadgeElementValue, getBadgePhotoUrl, matchesBadgeConditions, resolveBadgeTemplate, type BadgeAttendee, type BadgeTemplate } from "@/lib/badges/badge";
 import type { BadgeElement, BadgeFieldKey, BadgeTemplateInput } from "@/types/schemas/badge";
 
 type TicketTier = {
@@ -68,6 +69,7 @@ type BadgeDesignerProps = {
 
 const FIELD_OPTIONS: Array<{ value: BadgeFieldKey; label: string }> = [
   { value: "photo", label: "Photo" },
+  { value: "image", label: "Image" },
   { value: "displayName", label: "Display name" },
   { value: "legalName", label: "Legal name" },
   { value: "ticketId", label: "Ticket number" },
@@ -183,6 +185,8 @@ export default function BadgeDesigner({
   const [statusFilter, setStatusFilter] = useState("CONFIRMED");
   const [tierFilter, setTierFilter] = useState("");
   const [searchFilter, setSearchFilter] = useState("");
+  const [printQueue, setPrintQueue] = useState<Array<BadgeTemplateInput | null>>([null]);
+  const [queueTemplateId, setQueueTemplateId] = useState("");
   const [pageMode, setPageMode] = useState<"sheet" | "single">("sheet");
   const [saving, setSaving] = useState(false);
   const [loadingAttendees, setLoadingAttendees] = useState(false);
@@ -193,6 +197,7 @@ export default function BadgeDesigner({
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<{ severity: "success" | "info" | "warning" | "error"; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadTargetRef = useRef<{ kind: "background" | "rule" | "element"; id?: string }>({ kind: "background" });
   const fallbackPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const activeFallbackPhoto = fallbackPhotoQueue[fallbackPhotoQueueIndex] || null;
 
@@ -201,19 +206,33 @@ export default function BadgeDesigner({
   const sampleAttendee = attendees.find(attendee => attendee.registrationId === sampleAttendeeId) || attendees[0] || null;
   const selectedAttendees = attendees.filter(attendee => selectedAttendeeIds.includes(attendee.registrationId));
 
-  const previewStyle = useMemo(
-    () => ({
+  const preview = sampleAttendee ? resolveBadgeTemplate(draft, sampleAttendee) : draft;
+  const conditionFields = useMemo(() => {
+    const fields = new Set(["ticketTier", "crewRole", "crewDepartment", "status", "ticketId", ...customFields.map(field => `customFieldData.${field.id}`)]);
+    const collect = (value: unknown, prefix = "") => {
+      if (value && typeof value === "object") {
+        for (const [key, child] of Object.entries(value)) {
+          if (key !== "data") collect(child, prefix ? `${prefix}.${key}` : key);
+        }
+      } else if (prefix) fields.add(prefix);
+    };
+    for (const attendee of attendees) {
+      collect(attendee);
+      collect(attendee.data);
+    }
+    return [...fields].sort();
+  }, [attendees, customFields]);
+
+  const previewStyle = {
       width: "100%",
       maxWidth: 560,
-      aspectRatio: `${draft.widthMm} / ${draft.heightMm}`,
-      backgroundColor: draft.background.color,
-      backgroundImage: draft.background.imageUrl ? `url("${draft.background.imageUrl}")` : undefined,
-      backgroundSize: draft.background.fit === "stretch" ? "100% 100%" : draft.background.fit,
-      backgroundPosition: `${draft.background.positionX}% ${draft.background.positionY}%`,
+      aspectRatio: `${preview.widthMm} / ${preview.heightMm}`,
+      backgroundColor: preview.background.color,
+      backgroundImage: preview.background.imageUrl ? `url("${preview.background.imageUrl}")` : undefined,
+      backgroundSize: preview.background.fit === "stretch" ? "100% 100%" : preview.background.fit,
+      backgroundPosition: `${preview.background.positionX}% ${preview.background.positionY}%`,
       backgroundRepeat: "no-repeat",
-    }),
-    [draft],
-  );
+  };
 
   const setDraftField = <K extends keyof BadgeTemplateInput>(field: K, value: BadgeTemplateInput[K]) => {
     setDraft(current => ({ ...current, [field]: value }));
@@ -377,6 +396,7 @@ export default function BadgeDesigner({
     const file = event.target.files?.[0];
     if (!file) return;
 
+    const target = uploadTargetRef.current;
     setUploading(true);
     setNotice(null);
     try {
@@ -391,15 +411,13 @@ export default function BadgeDesigner({
         throw new Error(getErrorMessage(payload, "Failed to upload background image"));
       }
 
-      setDraft(current => ({
-        ...current,
-        background: {
-          ...current.background,
-          imageUrl: payload.url,
-          positionX: current.background.positionX ?? 50,
-          positionY: current.background.positionY ?? 50,
-        },
-      }));
+      setDraft(current => target.kind === "element" ? {
+        ...current, elements: current.elements.map(element => element.id === target.id ? { ...element, imageUrl: payload.url } : element),
+      } : target.kind === "rule" ? {
+        ...current, background: { ...current.background, rules: current.background.rules?.map(rule => rule.id === target.id ? { ...rule, imageUrl: payload.url } : rule) },
+      } : {
+        ...current, background: { ...current.background, imageUrl: payload.url },
+      });
     } catch (error) {
       setNotice({ severity: "error", message: error instanceof Error ? error.message : "Failed to upload background image" });
     } finally {
@@ -503,8 +521,9 @@ export default function BadgeDesigner({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          template: draft,
+          template: format === "html" ? printQueue[0] || draft : draft,
           attendeeIds,
+          additionalTemplates: format === "html" ? printQueue.slice(1).map(design => design || draft) : [],
           format,
           pageMode,
         }),
@@ -619,7 +638,7 @@ export default function BadgeDesigner({
                 <MenuItem value="stretch">Stretch</MenuItem>
               </TextField>
               <input ref={fileInputRef} hidden type="file" accept="image/*" onChange={event => void handleBackgroundUpload(event)} />
-              <Button variant="outlined" startIcon={uploading ? <CircularProgress size={18} /> : <ImageIcon />} onClick={() => fileInputRef.current?.click()} disabled={uploading || !canWrite}>
+              <Button variant="outlined" startIcon={uploading ? <CircularProgress size={18} /> : <ImageIcon />} onClick={() => { uploadTargetRef.current = { kind: "background" }; fileInputRef.current?.click(); }} disabled={uploading || !canWrite}>
                 Upload background
               </Button>
               {draft.background.imageUrl ? (
@@ -649,6 +668,38 @@ export default function BadgeDesigner({
                   </Button>
                 </>
               ) : null}
+              <Divider />
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Adaptive backgrounds</Typography>
+                <Typography variant="caption" color="text.secondary">First matching rule wins. Otherwise, use the base background.</Typography>
+                {(draft.background.rules || []).map((rule, index) => <Paper key={rule.id} variant="outlined" sx={{ p: 1 }}>
+                  <Stack spacing={1}>
+                    <Typography variant="subtitle2">Rule {index + 1}</Typography>
+                    <BadgeConditions conditions={rule.conditions} fields={conditionFields} attendee={sampleAttendee}
+                      onChange={conditions => setDraftField("background", { ...draft.background, rules: conditions.length ? draft.background.rules?.map(entry => entry.id === rule.id ? { ...entry, conditions } : entry) : draft.background.rules?.filter(entry => entry.id !== rule.id) })} />
+                    <TextField size="small" label="Replacement image URL" value={rule.imageUrl || ""} helperText="Empty removes the background image."
+                      onChange={event => setDraftField("background", { ...draft.background, rules: draft.background.rules?.map(entry => entry.id === rule.id ? { ...entry, imageUrl: event.target.value || null } : entry) })} />
+                    <Button size="small" disabled={uploading || !canWrite} onClick={() => {
+                      uploadTargetRef.current = { kind: "rule", id: rule.id }; fileInputRef.current?.click();
+                    }}>Upload rule image</Button>
+                    <TextField size="small" label="Replacement color" type="color" value={rule.color || draft.background.color}
+                      onChange={event => setDraftField("background", { ...draft.background, rules: draft.background.rules?.map(entry => entry.id === rule.id ? { ...entry, color: event.target.value } : entry) })} />
+                    <Stack direction="row">
+                      <Button size="small" disabled={index === 0} onClick={() => {
+                        const rules = [...(draft.background.rules || [])];
+                        [rules[index - 1], rules[index]] = [rules[index], rules[index - 1]];
+                        setDraftField("background", { ...draft.background, rules });
+                      }}>Move up</Button>
+                      <Button size="small" color="error" onClick={() => setDraftField("background", { ...draft.background, rules: draft.background.rules?.filter(entry => entry.id !== rule.id) })}>Remove rule</Button>
+                    </Stack>
+                  </Stack>
+                </Paper>)}
+                <Button size="small" variant="outlined" disabled={(draft.background.rules?.length || 0) >= 20}
+                  onClick={() => setDraftField("background", { ...draft.background, rules: [...(draft.background.rules || []), {
+                    id: crypto.randomUUID(), conditions: [{ field: "ticketTier", operator: "equals", value: "Sponsor" }],
+                    color: "#fef3c7", imageUrl: draft.background.imageUrl || null,
+                  }] })}>Add background rule</Button>
+              </Stack>
               <Divider />
               <Stack spacing={1}>
                 <Typography variant="subtitle2">Fallback profile photos</Typography>
@@ -707,7 +758,7 @@ export default function BadgeDesigner({
           <Paper variant="outlined" sx={{ p: 2 }}>
             <Stack spacing={2}>
               <Stack direction="row" justifyContent="space-between" alignItems="center" gap={2}>
-                <Typography variant="h6">Preview</Typography>
+                <Typography variant="h6">Live preview</Typography>
                 <TextField
                   select
                   size="small"
@@ -724,8 +775,15 @@ export default function BadgeDesigner({
                 </TextField>
               </Stack>
 
-              <Box sx={{ display: "flex", justifyContent: "center", overflowX: "auto", py: 2 }}>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Chip size="small" color="primary" variant="outlined" label={`${preview.elements.length} / ${draft.elements.length} layers visible`} />
+                <Chip size="small" variant="outlined" label={sampleAttendee && draft.background.rules?.some(rule => matchesBadgeConditions(rule.conditions, sampleAttendee)) ? "Adaptive background matched" : "Base background"} />
+              </Stack>
+              <Box sx={{ display: "flex", justifyContent: "center", overflowX: "auto", p: { xs: 1, sm: 3 }, borderRadius: 2,
+                backgroundColor: "action.hover", backgroundImage: "radial-gradient(circle, #94a3b840 1px, transparent 1px)", backgroundSize: "16px 16px" }}>
                 <Box
+                  role="region"
+                  aria-label="Badge preview"
                   sx={{
                     ...previewStyle,
                     position: "relative",
@@ -735,9 +793,9 @@ export default function BadgeDesigner({
                     boxShadow: 2,
                   }}
                 >
-                  {sampleAttendee ? draft.elements.map(element => {
-                    const photoUrl = element.type === "photo" ? getBadgePhotoUrl(draft, sampleAttendee) : null;
-                    const textValue = !isShapeElement(element) && element.type !== "photo" && element.type !== "qrCode"
+                  {sampleAttendee ? preview.elements.map(element => {
+                    const photoUrl = element.type === "image" ? element.imageUrl : element.type === "photo" ? getBadgePhotoUrl(preview, sampleAttendee) : null;
+                    const textValue = !isShapeElement(element) && element.type !== "photo" && element.type !== "image" && element.type !== "qrCode"
                       ? getBadgeElementValue(element, sampleAttendee, eventId)
                       : "";
                     const fittedText = textValue ? fitBadgeText(draft, element, textValue) : null;
@@ -772,14 +830,14 @@ export default function BadgeDesigner({
                           ...parseCustomCss(element.customCss),
                         }}
                       >
-                        {isShapeElement(element) ? null : element.type === "photo" ? (
+                        {isShapeElement(element) ? null : element.type === "photo" || element.type === "image" ? (
                           photoUrl ? (
                             <Box sx={{ position: "relative", width: "100%", height: "100%", borderRadius: element.shape === "circle" ? "999px" : 1, overflow: "hidden" }}>
                               <Image src={photoUrl} alt="" fill unoptimized style={{ objectFit: "cover" }} />
                             </Box>
                           ) : (
                             <Box sx={{ width: "100%", height: "100%", bgcolor: "grey.200", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: element.shape === "circle" ? "999px" : 1 }}>
-                              {attendeeInitials(sampleAttendee.displayName)}
+                              {element.type === "photo" ? attendeeInitials(sampleAttendee.displayName) : "Add image URL"}
                             </Box>
                           )
                         ) : element.type === "qrCode" ? (
@@ -847,6 +905,7 @@ export default function BadgeDesigner({
                           <Box sx={{ minWidth: 0, flex: 1 }}>
                             <Typography variant="body2" fontWeight={600} noWrap>{element.label}</Typography>
                             <Typography variant="caption" color="text.secondary">{TYPE_OPTIONS.find(option => option.value === element.type)?.label || element.type}</Typography>
+                            {element.conditions?.length ? <Chip size="small" label={sampleAttendee && matchesBadgeConditions(element.conditions, sampleAttendee) ? "Visible" : "Hidden"} /> : null}
                           </Box>
                           <Tooltip title="Move forward">
                             <span>
@@ -980,6 +1039,18 @@ export default function BadgeDesigner({
                       <MenuItem value="circle">Circle</MenuItem>
                     </TextField>
                   ) : null}
+                  {selectedElement.type === "image" ? <>
+                    <TextField label="Image URL" value={selectedElement.imageUrl || ""}
+                      onChange={event => updateElement(selectedElement.id, { imageUrl: event.target.value || undefined })} fullWidth />
+                    <Button disabled={uploading || !canWrite} onClick={() => {
+                      uploadTargetRef.current = { kind: "element", id: selectedElement.id }; fileInputRef.current?.click();
+                    }}>Upload layer image</Button>
+                  </> : null}
+                  <Divider />
+                  <Typography variant="subtitle2">Show this layer when</Typography>
+                  <Typography variant="caption" color="text.secondary">All conditions must match. No conditions means always visible.</Typography>
+                  <BadgeConditions conditions={selectedElement.conditions || []} fields={conditionFields} attendee={sampleAttendee}
+                    onChange={conditions => updateElement(selectedElement.id, { conditions })} />
                   <TextField
                     label="Custom CSS"
                     value={selectedElement.customCss || ""}
@@ -995,6 +1066,38 @@ export default function BadgeDesigner({
           </Paper>
         </Grid>
       </Grid>
+
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack spacing={2}>
+          <Typography variant="h6">Badge print queue</Typography>
+          <Typography variant="body2" color="text.secondary">Each attendee receives these badges in order. Current design follows your edits; added designs are snapshots. Add a design again for extra copies.</Typography>
+          {printQueue.map((design, index) => <Stack key={index} direction="row" spacing={1} alignItems="center">
+            <Typography sx={{ flex: 1 }}>{index + 1}. {design ? design.name : `Current design: ${draft.name}`}</Typography>
+            <Button size="small" disabled={index === 0} onClick={() => setPrintQueue(current => {
+              const queue = [...current];
+              [queue[index - 1], queue[index]] = [queue[index], queue[index - 1]];
+              return queue;
+            })}>Move up</Button>
+            <Button size="small" disabled={index === printQueue.length - 1} onClick={() => setPrintQueue(current => {
+              const queue = [...current];
+              [queue[index], queue[index + 1]] = [queue[index + 1], queue[index]];
+              return queue;
+            })}>Move down</Button>
+            <Button size="small" color="error" disabled={printQueue.length === 1} onClick={() => setPrintQueue(current => current.filter((_, position) => position !== index))}>Remove badge {index + 1}</Button>
+          </Stack>)}
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+            <TextField select size="small" label="Additional design" value={queueTemplateId} onChange={event => setQueueTemplateId(event.target.value)} sx={{ minWidth: 220 }}>
+              <MenuItem value="">Current design (snapshot)</MenuItem>
+              {templates.map(template => <MenuItem key={template.id} value={template.id}>{template.name}</MenuItem>)}
+            </TextField>
+            <Button variant="outlined" disabled={printQueue.length >= 10} onClick={() => {
+              const design = templates.find(template => template.id === queueTemplateId) || draft;
+              setPrintQueue(current => [...current, structuredClone(templateToDraft(design))]);
+            }}>Add badge to queue</Button>
+            <Chip label={`${printQueue.length} badges per attendee · ${selectedAttendees.length * printQueue.length} total`} />
+          </Stack>
+        </Stack>
+      </Paper>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Stack spacing={2}>
@@ -1036,7 +1139,7 @@ export default function BadgeDesigner({
             </TextField>
             <Button startIcon={<Print />} variant="contained" onClick={() => void exportBadges("html", true)} disabled={exporting}>Print</Button>
             <Button startIcon={<Download />} variant="outlined" onClick={() => void exportBadges("html")} disabled={exporting}>Open PDF view</Button>
-            <Button startIcon={<Download />} variant="outlined" onClick={() => void exportBadges("png")} disabled={exporting || selectedAttendees.length === 0}>PNG first selected</Button>
+            <Button startIcon={<Download />} variant="outlined" onClick={() => void exportBadges("png")} disabled={exporting || selectedAttendees.length === 0}>PNG current design, first selected</Button>
           </Stack>
 
           <Grid container spacing={1}>

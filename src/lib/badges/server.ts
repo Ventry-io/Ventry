@@ -3,7 +3,7 @@ import QRCodeGenerator from "qr.js/lib/QRCode";
 import sharp from "sharp";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma/prisma";
-import { attendeeInitials, fitBadgeText, getBadgeElementValue, getBadgePhotoUrl, type BadgeAttendee } from "@/lib/badges/badge";
+import { attendeeInitials, fitBadgeText, getBadgeElementValue, getBadgePhotoUrl, resolveBadgeTemplate, type BadgeAttendee } from "@/lib/badges/badge";
 import { refreshSignedUrls } from "@/lib/user/profilePicture";
 import type { BadgeAttendeeQuery, BadgeElement, BadgeTemplateInput } from "@/types/schemas/badge";
 
@@ -71,7 +71,7 @@ function toRecord(value: Prisma.JsonValue): Record<string, string | number | boo
 
 export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQuery): Promise<BadgeAttendee[]> {
   const search = query.search?.trim();
-  const registrations = await prisma.registration.findMany({
+  const registrationQuery = {
     where: {
       eventId,
       status:
@@ -107,6 +107,12 @@ export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQu
         select: {
           name: true,
           organizationId: true,
+          id: true,
+          status: true,
+          startDate: true,
+          endDate: true,
+          requiresHotel: true,
+          maxRegistrations: true,
         },
       },
       user: {
@@ -117,6 +123,9 @@ export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQu
           legalName: true,
           image: true,
           isAdmin: true,
+          username: true,
+          pronouns: true,
+          country: true,
           adminProfile: { select: { organizationMemberships: { select: { organizationId: true, role: true, department: { select: { name: true } } } } } },
           profilePictures: {
             orderBy: [
@@ -147,6 +156,34 @@ export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQu
       },
     },
     orderBy: [{ ticketId: "asc" }],
+  } satisfies Prisma.RegistrationFindManyArgs;
+  let eventCrew = new Map<string, { role: string | null; department: string | null }>();
+  const registrations = await prisma.registration.findMany(registrationQuery).catch(async (error: unknown) => {
+    // ponytail: Bridge the newer crew schema in shared development databases; remove when this branch adopts event-scoped crew.
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "P2022" ||
+      !/AdminOrganizationMembership\.(role|departmentId)/.test(error.message)) throw error;
+
+    const [rows, assignments] = await Promise.all([
+      prisma.registration.findMany({
+        ...registrationQuery,
+        include: {
+          ...registrationQuery.include,
+          user: { select: { ...registrationQuery.include.user.select, adminProfile: false } },
+        },
+      }),
+      prisma.$queryRaw<Array<{ registrationId: string; role: string | null; department: string | null }>>`
+        SELECT r."id" AS "registrationId", a."role", d."name" AS "department"
+        FROM "CrewAssignment" a
+        JOIN "AdminOrganizationMembership" m ON m."id" = a."membershipId"
+        JOIN "Admin" admin ON admin."id" = m."adminId"
+        JOIN "Registration" r ON r."userId" = admin."userId" AND r."eventId" = a."eventId"
+        JOIN "Event" e ON e."id" = a."eventId" AND e."organizationId" = m."organizationId"
+        LEFT JOIN "CrewDepartment" d ON d."id" = a."departmentId"
+        WHERE a."eventId" = ${eventId}
+      `,
+    ]);
+    eventCrew = new Map(assignments.map(assignment => [assignment.registrationId, assignment]));
+    return rows.map(row => ({ ...row, user: { ...row.user, adminProfile: null } }));
   });
 
   return Promise.all(registrations.map(async registration => {
@@ -155,9 +192,10 @@ export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQu
     const primaryPicture = profilePictures.find(picture => picture.isPrimary) || profilePictures[0];
 
     const crew = registration.user.isAdmin ? registration.user.adminProfile?.organizationMemberships.find(m => m.organizationId === registration.event.organizationId) : null;
+    const assignment = registration.user.isAdmin ? eventCrew.get(registration.id) : null;
     return {
-      crewDepartment: crew?.department?.name || null,
-      crewRole: crew?.role || null,
+      crewDepartment: assignment?.department || crew?.department?.name || null,
+      crewRole: assignment?.role || crew?.role || null,
       id: registration.id,
       registrationId: registration.id,
       ticketId: registration.ticketId,
@@ -169,6 +207,37 @@ export async function loadBadgeAttendees(eventId: number, query: BadgeAttendeeQu
       ticketTier: ticketItem?.product.name || null,
       eventName: registration.event.name,
       customFieldData: toRecord(registration.customFieldData as Prisma.JsonValue),
+      data: {
+        user: {
+          id: registration.user.id,
+          name: registration.user.name,
+          legalName: registration.user.legalName,
+          email: registration.user.email,
+          username: registration.user.username,
+          pronouns: registration.user.pronouns,
+          country: registration.user.country,
+          isAdmin: registration.user.isAdmin,
+        },
+        event: {
+          ...registration.event,
+          startDate: registration.event.startDate.toISOString(),
+          endDate: registration.event.endDate.toISOString(),
+        },
+        registration: {
+          id: registration.id,
+          status: registration.status,
+          ticketId: registration.ticketId,
+          preferences: registration.preferences,
+          customFieldData: registration.customFieldData,
+          checkInCount: registration.checkInCount,
+          checkedInAt: registration.checkedInAt?.toISOString() || null,
+          createdAt: registration.createdAt.toISOString(),
+        },
+        products: registration.registrationItems.map(item => ({
+          ...item.product,
+          priceAtBooking: item.priceAtBooking,
+        })),
+      },
     };
   }));
 }
@@ -250,13 +319,13 @@ function renderElementHtml(element: BadgeElement, template: BadgeTemplateInput, 
     return `<div style="${escapeAttr(elementCss(element, shapeStyles))}"></div>`;
   }
 
-  if (element.type === "photo") {
-    const photoUrl = getBadgePhotoUrl(template, attendee);
+  if (element.type === "photo" || element.type === "image") {
+    const photoUrl = element.type === "image" ? element.imageUrl : getBadgePhotoUrl(template, attendee);
     if (photoUrl) {
       return `<img alt="" src="${escapeAttr(photoUrl)}" style="${escapeAttr(elementCss(element, ["object-fit:cover", `border-radius:${element.shape === "circle" ? "999px" : "4px"}`]))}" />`;
     }
 
-    return `<div style="${escapeAttr(elementCss(element, ["background:#e2e8f0", `border-radius:${element.shape === "circle" ? "999px" : "4px"}`]))}">${escapeHtml(attendeeInitials(attendee.displayName))}</div>`;
+    return element.type === "image" ? "" : `<div style="${escapeAttr(elementCss(element, ["background:#e2e8f0", `border-radius:${element.shape === "circle" ? "999px" : "4px"}`]))}">${escapeHtml(attendeeInitials(attendee.displayName))}</div>`;
   }
 
   if (element.type === "qrCode") {
@@ -271,12 +340,13 @@ function renderElementHtml(element: BadgeElement, template: BadgeTemplateInput, 
 }
 
 export function renderBadgeHtml(template: BadgeTemplateInput, attendee: BadgeAttendee, eventId: number) {
+  template = resolveBadgeTemplate(template, attendee);
   const elements = template.elements.map(element => renderElementHtml(element, template, attendee, eventId)).join("");
   const backgroundImage = template.background.imageUrl
     ? `<img alt="" class="badge-bg" src="${escapeAttr(template.background.imageUrl)}" style="${backgroundImageCss(template)}" />`
     : "";
 
-  return `<section class="badge" style="width:${template.widthMm}mm;height:${template.heightMm}mm;${backgroundCss(template)}">${backgroundImage}${elements}</section>`;
+  return `<section class="badge" style="${escapeAttr(`width:${template.widthMm}mm;height:${template.heightMm}mm;${backgroundCss(template)}`)}">${backgroundImage}${elements}</section>`;
 }
 
 export function renderPrintableBadgesHtml(
@@ -284,8 +354,9 @@ export function renderPrintableBadgesHtml(
   attendees: BadgeAttendee[],
   eventId: number,
   pageMode: "sheet" | "single",
+  additionalTemplates: BadgeTemplateInput[] = [],
 ) {
-  const badges = attendees.map(attendee => renderBadgeHtml(template, attendee, eventId)).join("");
+  const badges = attendees.flatMap(attendee => [template, ...additionalTemplates].map(design => renderBadgeHtml(design, attendee, eventId))).join("");
   const pageBreak = pageMode === "single" ? ".badge{break-after:page;page-break-after:always;}" : "";
 
   return `<!doctype html>
@@ -344,15 +415,65 @@ function svgShape(element: BadgeElement) {
   return `<rect x="${element.x}%" y="${element.y}%" width="${element.width}%" height="${element.height}%" rx="${element.type === "line" ? "999" : "1"}" fill="${fill}"${stroke}${style}/>`;
 }
 
+export class BadgeImageError extends Error {}
+
+async function badgeImageDataUrl(imageUrl: string) {
+  const url = new URL(imageUrl);
+  const storageOrigin = process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).origin : null;
+  const storageImage = url.origin === storageOrigin && url.pathname.startsWith("/storage/v1/object/");
+  const profileImage = url.protocol === "https:" && !url.port &&
+    ["lh3.googleusercontent.com", "avatars.githubusercontent.com"].includes(url.hostname);
+  if (url.username || url.password || (!storageImage && !profileImage)) {
+    throw new BadgeImageError("PNG images must use uploaded media or supported profile images. Use the print view for external image URLs.");
+  }
+  try {
+    const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(10_000) });
+    if (!response.ok || !response.body) throw new Error("Image unavailable");
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > 10 * 1024 * 1024) throw new Error("Image too large");
+        chunks.push(value);
+      }
+    } finally {
+      await reader.cancel();
+    }
+    const { data, info } = await sharp(Buffer.concat(chunks), { limitInputPixels: 40_000_000 }).resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true });
+    return { href: `data:image/png;base64,${data.toString("base64")}`, width: info.width, height: info.height };
+  } catch {
+    throw new BadgeImageError("Could not load a badge image for PNG export. Check the image or use the print view.");
+  }
+}
+
 export async function renderBadgePng(template: BadgeTemplateInput, attendee: BadgeAttendee, eventId: number) {
+  template = resolveBadgeTemplate(template, attendee);
   const width = Math.round(template.widthMm * PRINT_SCALE * 3.78);
   const height = Math.round(template.heightMm * PRINT_SCALE * 3.78);
+  const urls = new Set<string>();
+  if (template.background.imageUrl) urls.add(template.background.imageUrl);
+  for (const element of template.elements) {
+    const url = element.type === "image" ? element.imageUrl : element.type === "photo" ? getBadgePhotoUrl(template, attendee) : null;
+    if (url) urls.add(url);
+  }
+  const images = new Map(await Promise.all([...urls].map(async url => [url, await badgeImageDataUrl(url)] as const)));
   const elements = template.elements.map(element => {
     if (isShapeElement(element)) {
       return svgShape(element);
     }
 
-    if (element.type === "photo") {
+    if (element.type === "photo" || element.type === "image") {
+      const url = element.type === "image" ? element.imageUrl : getBadgePhotoUrl(template, attendee);
+      if (url) {
+        const clipId = `photo-${template.elements.indexOf(element)}`;
+        const radius = element.shape === "circle" ? Math.min(width * element.width, height * element.height) / 200 : 4 * PRINT_SCALE;
+        return `<defs><clipPath id="${clipId}"><rect x="${element.x}%" y="${element.y}%" width="${element.width}%" height="${element.height}%" rx="${radius}"/></clipPath></defs><image href="${images.get(url)?.href}" x="${element.x}%" y="${element.y}%" width="${element.width}%" height="${element.height}%" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})"/>`;
+      }
+      if (element.type === "image") return "";
       const rx = element.shape === "circle" ? `${Math.min(element.width, element.height) / 2}%` : "2%";
       const initials = attendeeInitials(attendee.displayName);
       return `<rect x="${element.x}%" y="${element.y}%" width="${element.width}%" height="${element.height}%" rx="${rx}" fill="#e2e8f0"/><text x="${element.x + element.width / 2}%" y="${element.y + element.height / 2}%" text-anchor="middle" dominant-baseline="middle" font-size="${element.fontSize * PRINT_SCALE}" font-weight="700" fill="#334155">${escapeHtml(initials)}</text>`;
@@ -365,6 +486,14 @@ export async function renderBadgePng(template: BadgeTemplateInput, attendee: Bad
     return svgText(template, element, getBadgeElementValue(element, attendee, eventId));
   }).join("");
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 100 100" preserveAspectRatio="none"><rect width="100%" height="100%" fill="${escapeAttr(template.background.color || "#ffffff")}"/>${elements}</svg>`;
+  let backgroundImage = "";
+  const image = template.background.imageUrl ? images.get(template.background.imageUrl) : null;
+  if (image) {
+    const scale = (template.background.fit === "contain" ? Math.min : Math.max)(width / image.width, height / image.height);
+    const imageWidth = template.background.fit === "stretch" ? width : image.width * scale;
+    const imageHeight = template.background.fit === "stretch" ? height : image.height * scale;
+    backgroundImage = `<image href="${image.href}" x="${(width - imageWidth) * template.background.positionX / 100}" y="${(height - imageHeight) * template.background.positionY / 100}" width="${imageWidth}" height="${imageHeight}" preserveAspectRatio="none"/>`;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${escapeAttr(template.background.color || "#ffffff")}"/>${backgroundImage}${elements}</svg>`;
   return sharp(Buffer.from(svg)).png().toBuffer();
 }

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const BADGE_FIELD_KEYS = [
   "photo",
+  "image",
   "displayName",
   "legalName",
   "ticketId",
@@ -19,6 +20,20 @@ export const BADGE_FIELD_KEYS = [
 
 export const badgeFieldKeySchema = z.enum(BADGE_FIELD_KEYS);
 
+export const badgeConditionSchema = z.object({
+  field: z.string().trim().min(1).max(200)
+    .refine(value => value.split(".").every(part => part && !["__proto__", "prototype", "constructor"].includes(part)), "Invalid field path"),
+  operator: z.enum(["equals", "notEquals", "contains", "greaterThan", "lessThan", "isEmpty", "isNotEmpty"]),
+  value: z.string().max(500).default(""),
+}).strict();
+
+const badgeBackgroundRuleSchema = z.object({
+  id: z.string().min(1),
+  conditions: z.array(badgeConditionSchema).min(1).max(10),
+  color: z.string().min(1).optional(),
+  imageUrl: z.string().url().nullable().optional(),
+}).strict();
+
 export const badgeBackgroundSchema = z
   .object({
     color: z.string().min(1).default("#ffffff"),
@@ -27,6 +42,7 @@ export const badgeBackgroundSchema = z
     positionX: z.number().min(0).max(100).default(50),
     positionY: z.number().min(0).max(100).default(50),
     fallbackPhotoUrls: z.array(z.string().url()).max(30).default([]),
+    rules: z.array(badgeBackgroundRuleSchema).max(20).optional(),
   })
   .strict();
 
@@ -50,6 +66,8 @@ export const badgeElementSchema = z
     borderColor: z.string().min(1).optional(),
     borderWidth: z.number().min(0).max(20).optional(),
     customCss: z.string().max(2000).optional(),
+    imageUrl: z.string().url().optional(),
+    conditions: z.array(badgeConditionSchema).max(10).optional(),
   })
   .strict();
 
@@ -86,6 +104,7 @@ export const badgeAttendeeQuerySchema = z
 export const badgeExportSchema = z
   .object({
     template: badgeTemplateInputSchema,
+    additionalTemplates: z.array(badgeTemplateInputSchema).max(9).optional(),
     attendeeIds: z.array(z.string()).min(1).max(250),
     format: z.enum(["html", "png"]).default("html"),
     pageMode: z.enum(["sheet", "single"]).default("sheet"),
@@ -93,6 +112,7 @@ export const badgeExportSchema = z
   .strict();
 
 export type BadgeFieldKey = z.infer<typeof badgeFieldKeySchema>;
+export type BadgeCondition = z.infer<typeof badgeConditionSchema>;
 export type BadgeBackground = z.infer<typeof badgeBackgroundSchema>;
 export type BadgeElement = z.infer<typeof badgeElementSchema>;
 export type BadgeTemplateInput = z.infer<typeof badgeTemplateInputSchema>;

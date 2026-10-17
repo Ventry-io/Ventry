@@ -265,6 +265,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => Promise<void> }) {
   const form = useForm<CreateOrgData>({
     resolver: zodResolver(createOrgSchema),
     mode: "onBlur",
+    defaultValues: { name: "", slug: "", description: "" },
   });
 
   const orgName = useWatch({ control: form.control, name: "name" }) ?? "";

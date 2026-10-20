@@ -92,7 +92,7 @@ async function ProfileViewPageContent({ params }: { params: Promise<{ username: 
     notFound();
   }
 
-  const [validatedPictures, conventions] = await Promise.all([
+  const [validatedPictures, events] = await Promise.all([
     refreshSignedUrls(user.profilePictures as ProfilePicture[]),
     user.showConventions
       ? prisma.event.findMany({
@@ -113,8 +113,8 @@ async function ProfileViewPageContent({ params }: { params: Promise<{ username: 
     id, signedUrl, isPrimary, createdAt,
   }));
   const now = new Date();
-  const attended = conventions.filter(event => event.endDate < now);
-  const upcoming = conventions.filter(event => event.endDate >= now)
+  const attended = events.filter(event => event.endDate < now);
+  const upcoming = events.filter(event => event.endDate >= now)
     .sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
   const hasPersonalInfo = !isOrganization && (age !== null || Boolean(user.pronouns));
   const hasSidebar = hasPersonalInfo || pictures.length > 1;
@@ -143,8 +143,8 @@ async function ProfileViewPageContent({ params }: { params: Promise<{ username: 
             {user.bio && <ProfileBio bio={user.bio} />}
 
             {user.showConventions && [
-              { id: 'upcoming-events', title: 'Upcoming events', events: upcoming, description: 'Where you can meet next.', empty: 'No upcoming cons to share yet.' },
-              { id: 'attended-events', title: 'Attended events', events: attended, description: 'Past cons with a confirmed registration.', empty: 'No past cons to share yet.' },
+              { id: 'upcoming-events', title: 'Upcoming events', events: upcoming, description: 'Where you can meet next.', empty: 'No upcoming events to share yet.' },
+              { id: 'attended-events', title: 'Attended events', events: attended, description: 'Past events with a confirmed registration.', empty: 'No past events to share yet.' },
             ].map(section => (
               <Paper component="section" aria-labelledby={`${section.id}-title`} id={section.id} variant="outlined" key={section.id} sx={{ p: { xs: 2, sm: 3 }, borderRadius: 3, scrollMarginTop: 80 }}>
                 <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 0.5 }}>

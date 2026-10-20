@@ -898,10 +898,10 @@ export default function ProfilePageClient({ user, isOrganization = false, isOrga
                             onChange={(e) => setFormData(prev => ({ ...prev, showConventions: e.target.checked }))}
                           />
                         }
-                        label="Show all my cons publicly"
+                        label="Show all my events publicly"
                       />
                       <Typography variant="body2" color="text.secondary">
-                        Show all your past and upcoming confirmed cons on your public profile. Tickets and payment details stay private.
+                        Show all your past and upcoming confirmed events on your public profile. Tickets and payment details stay private.
                       </Typography>
 
                       {formData.showAge && (

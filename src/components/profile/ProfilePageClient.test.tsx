@@ -73,11 +73,11 @@ describe("Profile settings tabs", () => {
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     await screen.findByText('Check-in ready');
   });
-  it("defaults cons to private and saves the public visibility choice", async () => {
+  it("defaults events to private and saves the public visibility choice", async () => {
     const fetchMock = setupFetch();
     render(<ProfilePageClient user={BASE_USER} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Personal information' }));
-    const toggle = screen.getByLabelText('Show all my cons publicly');
+    const toggle = screen.getByLabelText('Show all my events publicly');
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));

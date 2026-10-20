@@ -511,7 +511,7 @@ async function EventDetailPageContent({
                 <Typography variant="h6" gutterBottom>Includes</Typography>
                 <Stack direction="row" flexWrap="wrap" gap={1}>
                   <Chip label="Badge" variant="outlined" />
-                  <Chip label="Convention Access" variant="outlined" />
+                  <Chip label="Event Access" variant="outlined" />
                   <Chip label="Workshops" variant="outlined" />
                   {accommodationHotels.length > 0 && (
                     <Chip label="Hotel Support" variant="outlined" />

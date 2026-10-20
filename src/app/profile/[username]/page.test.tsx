@@ -80,8 +80,8 @@ describe("Public profile events", () => {
   it("shows useful empty states when sharing is enabled without events", async () => {
     prismaMock.event.findMany.mockResolvedValue([]);
     await renderProfile(true);
-    expect(screen.getByText("No upcoming cons to share yet.")).toBeInTheDocument();
-    expect(screen.getByText("No past cons to share yet.")).toBeInTheDocument();
+    expect(screen.getByText("No upcoming events to share yet.")).toBeInTheDocument();
+    expect(screen.getByText("No past events to share yet.")).toBeInTheDocument();
     expect(screen.queryByText("Profile Information Coming Soon")).not.toBeInTheDocument();
   });
 

@@ -70,6 +70,25 @@ const VALID_REGISTRATION = {
 };
 
 describe("App Router: /api/user PATCH", () => {
+  it.each([true, false])("persists convention visibility %s", async (showConventions) => {
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1" } });
+    prismaMock.user.findUnique.mockResolvedValue({ id: "user-1", accounts: [] });
+    prismaMock.user.update.mockResolvedValue({ id: "user-1", showConventions });
+    const response = await userRoute.PATCH(patchRequest({ id: "user-1", showConventions }));
+    expect(response.status).toBe(200);
+    expect(prismaMock.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { showConventions }, select: expect.objectContaining({ showConventions: true }),
+    }));
+    await expect(response.json()).resolves.toMatchObject({ showConventions });
+  });
+
+  it("rejects non-boolean convention visibility", async () => {
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1" } });
+    const response = await userRoute.PATCH(patchRequest({ id: "user-1", showConventions: "true" }));
+    expect(response.status).toBe(400);
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -144,6 +163,13 @@ describe("App Router: /api/user PATCH", () => {
         }),
       }),
     );
+  });
+
+  it("rejects email updates that bypass verification", async () => {
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1" } });
+    const response = await userRoute.PATCH(patchRequest({ id: "user-1", email: "new@example.com" }));
+    expect(response.status).toBe(400);
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
   });
 
   it("normalizes country fields to ISO country codes", async () => {

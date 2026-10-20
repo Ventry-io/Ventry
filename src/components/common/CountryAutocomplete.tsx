@@ -53,8 +53,8 @@ export default function CountryAutocomplete({
       options={COUNTRIES}
       selectOnFocus
       value={selectedCountry}
-      renderOption={(props, country) => (
-        <Box component="li" {...props}>
+      renderOption={({ key, ...props }, country) => (
+        <Box key={key} component="li" {...props}>
           <Box component="span" sx={{ mr: 1, width: 24, flexShrink: 0 }}>
             {getCountryFlag(country.code)}
           </Box>

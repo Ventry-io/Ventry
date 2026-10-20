@@ -2,18 +2,19 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import prisma from "@/lib/prisma/prisma";
 import { getSession } from "@/lib/auth/session";
-import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
+import { usernameSchema } from "@/types/schemas/signup";
 import { isUsernameAvailable } from "@/lib/user/unique-name";
 import { changeUsername } from "@/lib/user/change-username";
 
 const schema = z.object({
-  username: z
-    .string()
-    .trim()
-    .min(2)
-    .max(DISPLAY_NAME_MAX_LENGTH)
-    .regex(/^\S+$/, "Username cannot contain spaces"),
+  username: usernameSchema,
 });
+
+export async function GET(req: NextRequest) {
+  const parsed = schema.safeParse({ username: req.nextUrl.searchParams.get("username") });
+  if (!parsed.success) return NextResponse.json({ available: false }, { status: 400 });
+  return NextResponse.json({ available: await isUsernameAvailable(parsed.data.username) }, { headers: { "Cache-Control": "no-store" } });
+}
 
 // PATCH: Change the current user's username. Kept separate from the general
 // PATCH /api/user route since a username change has side effects (uniqueness

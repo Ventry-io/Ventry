@@ -3,7 +3,7 @@ import { auth } from "@/app/api/auth/auth";
 import { prisma } from "@/lib/prisma/prisma";
 import { headers } from "next/headers";
 import { rethrowIfExpectedPrerenderInterruption } from "@/lib/next/prerender";
-import type { AdminOrgPermission } from "@/generated/prisma";
+import type { AdminOrgPermission, Prisma } from "@/generated/prisma";
 
 export type AdminAuthResult = {
   authorized: boolean;
@@ -17,6 +17,7 @@ export type EventAdminAuthResult = AdminAuthResult & {
   isEventOwner?: boolean;
   /** org membership that grants access, if applicable */
   orgId?: string;
+  canWrite?: boolean;
 };
 
 const adminWithOrgsSelect = {
@@ -31,6 +32,8 @@ const adminWithOrgsSelect = {
         select: {
           organizationId: true,
           permissions: true,
+          accessLevel: true,
+          organization: { select: { ownerId: true } },
         },
       },
     },
@@ -81,6 +84,7 @@ export async function checkEventAdminAuth(
   eventId: number,
   requiredPermission?: AdminOrgPermission,
   requestHeaders?: Headers,
+  requireWrite = false,
 ): Promise<EventAdminAuthResult> {
   try {
     const session = await auth.api.getSession({
@@ -118,6 +122,7 @@ export async function checkEventAdminAuth(
         user: { id: user.id, email: user.email },
         adminId: admin.id,
         isEventOwner: true,
+        canWrite: true,
       };
     }
 
@@ -127,7 +132,10 @@ export async function checkEventAdminAuth(
         m => m.organizationId === event.organizationId
       );
       if (membership) {
-        if (requiredPermission && !membership.permissions.includes(requiredPermission)) {
+        const isOrgOwner = membership.organization?.ownerId === admin.id;
+        const canWrite = isOrgOwner || membership.accessLevel === "WRITE";
+        if (requireWrite && !canWrite) return { authorized: false, error: "Read-only organization access" };
+        if (!isOrgOwner && requiredPermission && !membership.permissions.includes(requiredPermission)) {
           return { authorized: false, error: "Insufficient organization permissions" };
         }
         return {
@@ -136,6 +144,7 @@ export async function checkEventAdminAuth(
           adminId: admin.id,
           isEventOwner: false,
           orgId: event.organizationId,
+          canWrite,
         };
       }
     }
@@ -182,6 +191,40 @@ export async function adminEventFilter(adminId: string, orgScope?: string) {
       { ownerId: adminId },
       ...(orgIds.length > 0 ? [{ organizationId: { in: orgIds } }] : []),
     ],
+  };
+}
+
+export async function getAdminFinanceAccess(adminId: string, orgScope?: string): Promise<{
+  eventFilter: Prisma.EventWhereInput | null;
+  hasRestrictedOrganizations: boolean;
+}> {
+  if (orgScope === "personal") {
+    return { eventFilter: { ownerId: adminId }, hasRestrictedOrganizations: false };
+  }
+
+  const memberships = await prisma.adminOrganizationMembership.findMany({
+    where: { adminId },
+    select: { organizationId: true, permissions: true, organization: { select: { ownerId: true } } },
+  });
+  const allowed = memberships.filter(m =>
+    m.organization.ownerId === adminId || m.permissions.includes("STRIPE_FINANCES")
+  );
+
+  if (orgScope && orgScope !== "all") {
+    return {
+      eventFilter: allowed.some(m => m.organizationId === orgScope) ? { organizationId: orgScope } : null,
+      hasRestrictedOrganizations: false,
+    };
+  }
+
+  return {
+    eventFilter: {
+      OR: [
+        { ownerId: adminId },
+        ...(allowed.length ? [{ organizationId: { in: allowed.map(m => m.organizationId) } }] : []),
+      ],
+    },
+    hasRestrictedOrganizations: allowed.length < memberships.length,
   };
 }
 

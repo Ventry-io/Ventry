@@ -2,7 +2,7 @@ import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "@/lib/prisma/prisma";
 import { toNextJsHandler } from "better-auth/next-js";
-import { createAuthMiddleware, APIError } from "better-auth/api";
+import { createAuthMiddleware, APIError, getSessionFromCtx } from "better-auth/api";
 import { passkey } from "@better-auth/passkey";
 import { lastLoginMethod, twoFactor, multiSession } from "better-auth/plugins";
 import { hashPassword } from "@/lib/bcrypt";
@@ -14,7 +14,7 @@ import EmailVerificationMail from "@/components/emails/EmailVerificationMail";
 import { getTrustedOrigins } from "@/lib/security/origins";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
 import { signUpAdditionalFieldsSchema } from "@/types/schemas/signup";
-import { resolveUniqueUsername, sanitizeUsername } from "@/lib/user/unique-name";
+import { resolveUniqueUsername, sanitizeUsername, isUsernameAvailable } from "@/lib/user/unique-name";
 
 const cookiePrefix = "VENTRY";
 
@@ -25,8 +25,9 @@ function clampDisplayName(name: string | null | undefined) {
 export const auth = betterAuth({
     rateLimit: {
         enabled: true,
-        windowMs: 15 * 60 * 1000, // 15 minutes
-        maxRequests: 100, // limit each IP to 100 requests per windowMs
+        window: 15 * 60,
+        max: 100,
+        customRules: { "/send-verification-email": { window: 60, max: 1 } },
     },
     advanced: {
         cookiePrefix,
@@ -51,6 +52,19 @@ export const auth = betterAuth({
     session: {},
     hooks: {
         before: createAuthMiddleware(async (ctx) => {
+            if (ctx.path === "/unlink-account") {
+                const session = await getSessionFromCtx(ctx);
+                if (!session) return; // The endpoint's session middleware rejects unauthenticated requests.
+                const accounts = await ctx.context.internalAdapter.findAccounts(session.user.id);
+                const target = accounts.find(account => account.id === ctx.body?.accountId);
+                if (target?.providerId === "credential" || target?.providerId === "credentials") {
+                    throw new APIError("BAD_REQUEST", { message: "Email sign-in is required and cannot be removed." });
+                }
+                if (!accounts.some(account => account.providerId === "credential" && account.password)) {
+                    throw new APIError("BAD_REQUEST", { message: "Set an email password before removing linked accounts." });
+                }
+                return;
+            }
             // Registration writes go straight through better-auth, bypassing any
             // client-side zod schema entirely, so this is the real validation
             // boundary for legalName/address*/name on sign-up.
@@ -63,6 +77,10 @@ export const auth = betterAuth({
                 throw new APIError("BAD_REQUEST", {
                     message: parsed.error.issues[0]?.message ?? "Invalid registration data",
                 });
+            }
+
+            if (!(await isUsernameAvailable(sanitizeUsername(parsed.data.name)))) {
+                throw new APIError("CONFLICT", { message: "This username is taken. Choose another." });
             }
 
             return {
@@ -93,6 +111,19 @@ export const auth = betterAuth({
         },
     },
     user: {
+        changeEmail: {
+            enabled: true,
+            sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+                const html = await renderComponentToHTML(EmailVerificationMail, {
+                    userName: user.name,
+                    newEmail,
+                    verificationUrl: url,
+                    expiryHours: 24,
+                });
+                const { success } = await sendMail(user.email, "Confirm Your Email Change - Ventry", html);
+                if (!success) throw new Error("Failed to send email change confirmation");
+            },
+        },
         additionalFields: {
             isAdmin: {
                 type: "boolean",
@@ -119,9 +150,9 @@ export const auth = betterAuth({
             // Raw "First Last" name from the OAuth profile, captured once at
             // signup as a suggestion for the legalName step in
             // CompleteProfileWizard. Deliberately separate from `legalName`
-            // itself: that field is what gates the onboarding wizard (see
-            // profileCompletion middleware), so pre-filling it here would let
-            // SSO signups skip the wizard entirely.
+            // itself: event registration requires the user to confirm their
+            // check-in name rather than silently treating a provider's
+            // display name as their legal identity.
             // NOT input:false - better-auth's OAuth-profile merge
             // (parseAdditionalUserInputFromProviderProfile) silently drops
             // any additionalField marked input:false before it ever reaches
@@ -176,20 +207,19 @@ export const auth = betterAuth({
         sendOnSignIn: false,
         expiresIn: 24 * 60 * 60, // 24 hours (correct property name)
 
-        fromEmail: process.env.SMTP_FROM || "<ventry@m-loeffler.de>",
         autoSignInAfterVerification: true,
 
         sendVerificationEmail: async ({ user, url }) => {
-            // Rewrite the callbackURL so users land on /?status=email_verified after verification
-            const verificationUrl = url.replace(
-                /callbackURL=[^&]*/,
-                `callbackURL=${encodeURIComponent("/?status=email_verified")}`
-            );
+            const verificationUrl = new URL(url);
+            const callbackURL = verificationUrl.searchParams.get("callbackURL");
+            if (!callbackURL || callbackURL === "/") {
+                verificationUrl.searchParams.set("callbackURL", "/?status=email_verified");
+            }
             // Send email verification using proper template
             try {
                 const verificationHTML = await renderComponentToHTML(EmailVerificationMail, {
                     userName: user.name,
-                    verificationUrl,
+                    verificationUrl: verificationUrl.toString(),
                     expiryHours: 24
                 });
 
@@ -251,7 +281,6 @@ export const auth = betterAuth({
             mapProfileToUser(profile) {
                 const clamped = clampDisplayName(profile.name);
                 return {
-                    id: profile.sub,
                     name: clamped,
                     oauthLegalNameSuggestion: clamped,
                     email: profile.email,
@@ -268,7 +297,6 @@ export const auth = betterAuth({
             mapProfileToUser(profile) {
                 const clamped = clampDisplayName(profile.name || profile.login);
                 return {
-                    id: profile.id.toString(),
                     name: clamped,
                     // profile.login is a handle, not a legal name - only suggest
                     // one when GitHub actually gave us a "First Last" name.

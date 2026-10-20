@@ -32,7 +32,7 @@ export async function POST(
     const eventId = Number((await params).id);
     if (Number.isNaN(eventId)) return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
-    const authResult = await checkEventAdminAuth(eventId, req.headers);
+    const authResult = await checkEventAdminAuth(eventId, req.headers, undefined, true);
     if (!authResult.authorized) return NextResponse.json({ error: authResult.error || "Forbidden" }, { status: 403 });
 
     const body = await req.json();

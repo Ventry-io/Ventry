@@ -34,13 +34,18 @@ export async function GET(req: NextRequest) {
                         id: true,
                         name: true,
                         email: true,
-                        image: true
+                        image: true,
+                        isAdmin: true,
+                        adminProfile: { select: { organizationMemberships: { select: { organizationId: true, role: true, department: { select: { name: true } } } } } }
                     }
                 },
                 event: {
                     select: {
                         id: true,
-                        name: true
+                        name: true,
+                        ownerId: true,
+                        organizationId: true,
+                        organization: { select: { ownerId: true, members: { where: { adminId: authResult.adminId }, select: { accessLevel: true, permissions: true } } } }
                     }
                 },
                 registrationItems: {
@@ -81,7 +86,14 @@ export async function GET(req: NextRequest) {
             orderBy: { createdAt: 'desc' }
         });
 
-        return NextResponse.json({ registrations }, { status: 200 });
+        return NextResponse.json({ registrations: registrations.map(registration => {
+            const crew = registration.user.isAdmin ? registration.user.adminProfile?.organizationMemberships.find(m => m.organizationId === registration.event.organizationId) : null;
+            const membership = registration.event.organization?.members[0];
+            const owner = registration.event.ownerId === authResult.adminId || registration.event.organization?.ownerId === authResult.adminId;
+            const canWrite = owner || membership?.accessLevel === "WRITE";
+            const { adminProfile: _adminProfile, isAdmin: _isAdmin, ...user } = registration.user;
+            return { ...registration, user, event: { id: registration.event.id, name: registration.event.name }, crewDepartment: crew?.department?.name || null, crewRole: crew?.role || null, canWrite, canApprove: canWrite && (owner || membership?.permissions.includes("EVENT_APPROVAL")), canManageFinances: canWrite && (owner || membership?.permissions.includes("STRIPE_FINANCES")) };
+        }) }, { status: 200 });
     } catch (error) {
         rethrowIfExpectedPrerenderInterruption(error);
         console.error("Error listing admin registrations:", error);

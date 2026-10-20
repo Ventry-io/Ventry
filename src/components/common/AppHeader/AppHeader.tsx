@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppBar from "@mui/material/AppBar";
+import Alert from "@mui/material/Alert";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import Avatar from "@mui/material/Avatar";
@@ -32,6 +33,7 @@ export default function AppHeader() {
     const pathname = usePathname();
 
     const [visible, setVisible] = useState(true);
+    const [hasHealthIssues, setHasHealthIssues] = useState(false);
     const lastScrollY = useRef(0);
     // `user.image` is the raw OAuth-provider avatar URL, set at signup
     // regardless of whether the user ever opts in to importing it (see the
@@ -72,6 +74,40 @@ export default function AppHeader() {
         return () => controller.abort();
     }, [fetchProfilePicture]);
 
+    useEffect(() => {
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout>;
+        let pollIntervalMs = 10_000;
+
+        const checkHealth = async () => {
+            if (!document.hidden) {
+                try {
+                    const response = await fetch("/api/health", {
+                        cache: "no-store",
+                        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+                    });
+                    const data: { status?: unknown; cacheTtlMs?: unknown } | null = await response.json();
+                    if (!controller.signal.aborted) {
+                        if (typeof data?.cacheTtlMs === "number" && Number.isSafeInteger(data.cacheTtlMs) && data.cacheTtlMs > 0) {
+                            pollIntervalMs = Math.min(data.cacheTtlMs, 2_147_483_647);
+                        }
+                        setHasHealthIssues(!response.ok || data?.status !== "ok");
+                    }
+                } catch {
+                    if (!controller.signal.aborted) setHasHealthIssues(true);
+                }
+            }
+
+            if (!controller.signal.aborted) timer = setTimeout(checkHealth, pollIntervalMs);
+        };
+
+        void checkHealth();
+        return () => {
+            controller.abort();
+            clearTimeout(timer);
+        };
+    }, []);
+
     // The gallery (upload/set-primary/delete/reorder) and the onboarding
     // OAuth-avatar import both live outside this component and mutate the
     // same ProfilePicture rows - this event is how they tell the header to
@@ -109,9 +145,10 @@ export default function AppHeader() {
 
     return (
         <AppBar
-            position="fixed"
+            position="sticky"
             elevation={1}
             sx={{
+                zIndex: theme => theme.zIndex.drawer + 1,
                 top: 0,
                 left: 0,
                 right: 0,
@@ -145,12 +182,12 @@ export default function AppHeader() {
                     </Link>
 
                     {user?.isAdmin && (
-                        <Link href={isInAdminArea ? "/" : "/admin"} style={{ textDecoration: "none" }}>
+                        <Link href={isInAdminArea ? "/" : "/admin"} aria-label={isInAdminArea ? "Leave admin area" : "Admin"} style={{ textDecoration: "none" }}>
                             <Typography
                                 variant="h6"
                                 sx={{ color: "#f50057", fontWeight: "bold", "&:hover": { opacity: 0.8 }, transition: "opacity 0.2s", boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)" }}
                             >
-                                {isInAdminArea ? "← Leave admin area" : "Admin"}
+                                {isInAdminArea ? <><Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>← Leave admin area</Box><Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>Site</Box></> : "Admin"}
                             </Typography>
                         </Link>
                     )}
@@ -185,6 +222,11 @@ export default function AppHeader() {
                     ) : null}
                 </Box>
             </Toolbar>
+            {hasHealthIssues && (
+                <Alert severity="warning" sx={{ borderRadius: 0 }}>
+                    We might experience some issues right now.
+                </Alert>
+            )}
         </AppBar>
     );
 }

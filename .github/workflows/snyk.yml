@@ -4,11 +4,12 @@ name: Snyk Security
 # Renovate. Do NOT enable Snyk's "automatic fix PRs" / "upgrade PRs" in the
 # Snyk web UI for this repo, or it will compete with Renovate.
 #
-# All scan steps are non-blocking for now (continue-on-error: true) so we can
-# establish a clean baseline. Once the baseline is clean, drop
-# continue-on-error on the high/critical steps to make them blocking.
+# Findings are non-blocking while we establish a clean baseline. Only exit
+# code 1 (vulnerabilities found) is tolerated; technical scan errors fail CI.
+# Once the baseline is clean, make exit code 1 fail the scan steps as well.
 
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
   push:
@@ -18,13 +19,17 @@ on:
 
 permissions:
   contents: read
-  security-events: write # required to upload SARIF to Code Scanning
+
+concurrency:
+  group: snyk-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Snyk needs SNYK_TOKEN. Skip every scan job cleanly when it is absent
   # (e.g. on forks) instead of failing the workflow.
   guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       enabled: ${{ steps.check.outputs.enabled }}
     steps:
@@ -41,52 +46,100 @@ jobs:
 
   node:
     needs: guard
-    if: needs.guard.outputs.enabled == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: >-
+      needs.guard.outputs.enabled == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # Required to upload SARIF to Code Scanning
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Use the standalone CLI to scan the lockfile without installing or
+      # executing project dependencies. The setup action is pinned to v1.0.0;
+      # its default CLI version tracks the latest Snyk release.
+      - name: Set up Snyk CLI
+        uses: snyk/actions/setup@ce71ff9eda12bc48837b2855bca31364cdfa93e2 # v1.0.0
 
       - name: Snyk npm dependency scan
-        continue-on-error: true # non-blocking baseline; tighten to blocking later
-        uses: snyk/actions/node@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high --sarif-file-output=snyk-node.sarif
+        shell: bash
+        run: |
+          status=0
+          snyk test --file=package-lock.json --dev \
+            --severity-threshold=high --sarif-file-output=snyk-node.sarif || status=$?
+          case "$status" in
+            0) ;;
+            1) echo "::warning::Snyk found high/critical npm vulnerabilities (non-blocking baseline)." ;;
+            *) echo "::error::Snyk npm scan failed with exit code $status."; exit "$status" ;;
+          esac
+          if [ ! -s snyk-node.sarif ]; then
+            echo "::error::Snyk npm scan did not produce a SARIF report."
+            exit 1
+          fi
 
+      # Upload only if the scanner produced a SARIF file.
+      # Prevents failures when Snyk exits before generating results.
       - name: Upload npm scan results
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        if: ${{ always() && hashFiles('snyk-node.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk-node.sarif
           category: snyk-node
 
   container:
     needs: guard
-    # Container builds are heavy; only scan on push to deploy branches and the
-    # weekly schedule, not on every PR.
-    if: needs.guard.outputs.enabled == 'true' && github.event_name != 'pull_request'
+    # Container builds are heavy; only scan on push to deploy branches and
+    # the weekly schedule or manual runs, not on every PR.
+    if: >-
+      needs.guard.outputs.enabled == 'true' &&
+      github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # Required to upload SARIF to Code Scanning
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Build image for scanning
         run: docker build -t ventry:scan .
 
+      - name: Set up Snyk CLI
+        uses: snyk/actions/setup@ce71ff9eda12bc48837b2855bca31364cdfa93e2 # v1.0.0
+
       - name: Snyk container scan
-        continue-on-error: true # non-blocking baseline; tighten to blocking later
-        uses: snyk/actions/docker@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          image: ventry:scan
-          args: --file=Dockerfile --severity-threshold=high --sarif-file-output=snyk-docker.sarif
+        shell: bash
+        run: |
+          status=0
+          snyk container test ventry:scan --file=Dockerfile \
+            --severity-threshold=high --sarif-file-output=snyk-docker.sarif || status=$?
+          case "$status" in
+            0) ;;
+            1) echo "::warning::Snyk found high/critical container vulnerabilities (non-blocking baseline)." ;;
+            *) echo "::error::Snyk container scan failed with exit code $status."; exit "$status" ;;
+          esac
+          if [ ! -s snyk-docker.sarif ]; then
+            echo "::error::Snyk container scan did not produce a SARIF report."
+            exit 1
+          fi
 
+      # Upload only if the container scan produced a SARIF file.
       - name: Upload container scan results
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        if: ${{ always() && hashFiles('snyk-docker.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk-docker.sarif
           category: snyk-docker

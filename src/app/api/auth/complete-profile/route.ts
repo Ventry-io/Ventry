@@ -3,29 +3,23 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma/prisma";
 import { getSession } from "@/lib/auth/session";
 import { AdminType } from "@/generated/prisma";
-import { requiredCountryCodeSchema } from "@/types/schemas/country";
-import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
+import { optionalCountryCodeSchema } from "@/types/schemas/country";
+import { usernameSchema } from "@/types/schemas/signup";
 import { importOAuthProfilePicture } from "@/lib/user/profilePicture";
 import { isUsernameAvailable } from "@/lib/user/unique-name";
 import { changeUsername } from "@/lib/user/change-username";
 
 const schema = z
   .object({
-    username: z
-      .string()
-      .trim()
-      .min(2)
-      .max(DISPLAY_NAME_MAX_LENGTH)
-      .regex(/^\S+$/, "Username cannot contain spaces")
-      .optional(),
+    username: usernameSchema.optional(),
     importProfilePicture: z.boolean().optional(),
-    legalName: z.string().trim().min(2),
-    addressLine1: z.string().trim().min(2),
-    addressLine2: z.string().trim().optional().nullable(),
-    addressCity: z.string().trim().min(2),
-    addressState: z.string().trim().optional().nullable(),
-    addressPostalCode: z.string().trim().min(2),
-    addressCountry: requiredCountryCodeSchema,
+    legalName: z.string().trim().min(2).max(200).optional(),
+    addressLine1: z.string().trim().min(2).max(200).optional(),
+    addressLine2: z.string().trim().max(200).optional().nullable(),
+    addressCity: z.string().trim().min(2).max(120).optional(),
+    addressState: z.string().trim().max(120).optional().nullable(),
+    addressPostalCode: z.string().trim().min(2).max(40).optional(),
+    addressCountry: optionalCountryCodeSchema,
     path: z.enum(["ATTENDEE", "ORGANIZER"]),
     organizerType: z.enum(["INDIVIDUAL", "ORGANIZATION"]).optional(),
     orgName: z.string().trim().min(2).max(100).optional(),
@@ -38,6 +32,13 @@ const schema = z
       .optional(),
     orgDescription: z.string().trim().max(500).optional().nullable(),
   })
+  .superRefine((data, ctx) => {
+    if (data.path === "ORGANIZER") {
+      for (const field of ["legalName", "addressLine1", "addressCity", "addressPostalCode", "addressCountry"] as const) {
+        if (!data[field]) ctx.addIssue({ code: "custom", path: [field], message: "Required for organizers" });
+      }
+    }
+  })
   .refine((d) => d.path !== "ORGANIZER" || !!d.organizerType, {
     message: "Organizer type is required",
   })
@@ -46,10 +47,8 @@ const schema = z
     { message: "Organization name and slug are required for organization accounts" },
   );
 
-// POST: Complete the profile for an already-authenticated user (e.g. after
-// signing up via SSO), collecting the same data RegisterWizard collects for
-// email/password signups: legal/address details, attendee vs organizer path,
-// and organization details.
+// POST: Choose a public profile after OAuth, add a check-in name when needed,
+// add private booking details, or finish organizer setup.
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session?.user?.id) {
@@ -103,9 +102,9 @@ export async function POST(req: NextRequest) {
       data: {
         legalName: data.legalName,
         addressLine1: data.addressLine1,
-        addressLine2: data.addressLine2 ?? null,
+        addressLine2: data.addressLine2,
         addressCity: data.addressCity,
-        addressState: data.addressState ?? null,
+        addressState: data.addressState,
         addressPostalCode: data.addressPostalCode,
         addressCountry: data.addressCountry,
       },

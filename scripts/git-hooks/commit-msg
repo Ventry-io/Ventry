@@ -1,0 +1,20 @@
+#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+
+let subject;
+try {
+  subject = readFileSync(process.argv[2], "utf8").split(/\r?\n/, 1)[0];
+} catch (error) {
+  console.error(`Cannot read commit message: ${error.message}`);
+  process.exit(1);
+}
+
+const conventional = /^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(?:\([^\s()]+\))?!?:[ \t]+\S.*$/;
+const generated = /^(?:Merge (?:branch |remote-tracking branch |pull request #\d+\b|tag |commit )|Revert ".+"$)/;
+
+if (!conventional.test(subject) && !generated.test(subject)) {
+  console.error("Invalid commit subject. Use <type>(optional-scope)!: description");
+  console.error("Types: feat, fix, chore, docs, style, refactor, perf, test, build, ci, revert");
+  console.error("Example: feat(crew): add departments. Use ! for breaking changes.");
+  process.exit(1);
+}

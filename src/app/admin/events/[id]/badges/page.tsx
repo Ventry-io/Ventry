@@ -62,6 +62,7 @@ export default async function AdminEventBadgesPage({
 
   return (
     <BadgeDesigner
+      canWrite={authResult.canWrite}
       eventId={event.id}
       eventName={event.name}
       initialTemplates={templates.map(normalizeBadgeTemplate)}

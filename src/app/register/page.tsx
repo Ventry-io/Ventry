@@ -47,9 +47,13 @@ async function RegisterPageContent({
             variant="h4"
             fontWeight={700}
             align="center"
-            sx={{ mb: 4 }}
+            sx={{ mb: 1 }}
           >
             Create your account
+          </Typography>
+
+          <Typography color="text.secondary" align="center" sx={{ mb: 4 }}>
+            Start exploring in two steps. Add event details when you need them.
           </Typography>
 
           <RegisterWizard callbackUrl={callbackUrl} />

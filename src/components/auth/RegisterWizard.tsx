@@ -7,6 +7,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Divider,
   Grid,
   IconButton,
   InputAdornment,
@@ -26,9 +27,11 @@ import {
   Person,
   Visibility,
   VisibilityOff,
+  Google,
+  GitHub,
 } from "@mui/icons-material";
 import { alpha } from "@mui/material/styles";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
@@ -37,17 +40,15 @@ import PasswordStrengthMeter from "./PasswordStrengthMeter";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
 import { requiredCountryCodeSchema } from "@/types/schemas/country";
 import CountryAutocomplete from "@/components/common/CountryAutocomplete";
+import { getCallbackPath } from "@/lib/auth/callback";
+import { usernameSchema } from "@/types/schemas/signup";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
 const accountSchema = z
   .object({
     email: z.string().trim().email("Invalid email address"),
-    username: z
-      .string()
-      .trim()
-      .min(3, "Min 3 characters")
-      .max(DISPLAY_NAME_MAX_LENGTH, `Max ${DISPLAY_NAME_MAX_LENGTH} characters`),
+    username: usernameSchema,
     password: z
       .string()
       .min(8, "Min 8 characters")
@@ -115,15 +116,12 @@ function SelectionCard({
   return (
     <Paper
       variant="outlined"
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") onSelect();
-      }}
+      component="label"
       sx={{
         p: 3,
         cursor: "pointer",
+        display: "block",
+        position: "relative",
         borderWidth: selected ? 2 : 1,
         borderColor: selected ? "primary.main" : "divider",
         bgcolor: selected
@@ -134,7 +132,7 @@ function SelectionCard({
           borderColor: "primary.light",
           bgcolor: (t) => alpha(t.palette.primary.main, 0.03),
         },
-        "&:focus-visible": {
+        "&:focus-within": {
           outline: "2px solid",
           outlineColor: "primary.main",
           outlineOffset: 2,
@@ -143,6 +141,8 @@ function SelectionCard({
         minHeight: 160,
       }}
     >
+      <Box component="input" type="radio" name="account-type" checked={selected} onChange={onSelect}
+        sx={{ position: "absolute", opacity: 0, width: 1, height: 1 }} />
       <Stack alignItems="center" spacing={1.5} textAlign="center">
         <Box
           sx={{
@@ -184,6 +184,13 @@ export default function RegisterWizard({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [socialProvider, setSocialProvider] = useState<string | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const callback = getCallbackPath(callbackUrl);
+
+  useEffect(() => {
+    contentRef.current?.focus();
+  }, [step]);
   const [pwWarning, setPwWarning] = useState<{
     message: string | null;
     suggestions: string[];
@@ -203,10 +210,9 @@ export default function RegisterWizard({
     mode: "onBlur",
   });
 
-  const password = accountForm.watch("password");
-  const username = accountForm.watch("username") || "";
-  const orgNameValue = orgForm.watch("orgName") || "";
-  const slugManuallyEdited = useRef(false);
+  const password = useWatch({ control: accountForm.control, name: "password", defaultValue: "" });
+  const orgNameValue = useWatch({ control: orgForm.control, name: "orgName", defaultValue: "" });
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
 
   const generateSlug = useCallback(
     (name: string) =>
@@ -219,19 +225,18 @@ export default function RegisterWizard({
 
   // Auto-fill slug from org name
   useEffect(() => {
-    if (!slugManuallyEdited.current && orgNameValue) {
+    if (!slugManuallyEdited && orgNameValue) {
       orgForm.setValue("orgSlug", generateSlug(orgNameValue), {
         shouldValidate: step === S_ORG_DETAILS,
       });
     }
-  }, [orgNameValue, orgForm, generateSlug, step]);
+  }, [orgNameValue, orgForm, generateSlug, step, slugManuallyEdited]);
 
   // Dynamic stepper labels
   const steps = [
     "Account",
     "Your path",
-    "Personal details",
-    ...(path === "ORGANIZER" ? ["Organizer type"] : []),
+    ...(path === "ORGANIZER" ? ["Billing details", "Organizer type"] : []),
     ...(path === "ORGANIZER" && organizerType === "ORGANIZATION"
       ? ["Organization"]
       : []),
@@ -262,6 +267,15 @@ export default function RegisterWizard({
     } catch {
       // non-blocking
     }
+    try {
+      const res = await fetch(`/api/user/username?username=${encodeURIComponent(data.username)}`);
+      if (res.ok && !(await res.json()).available) {
+        accountForm.setError("username", { message: "This username is taken. Choose another." }, { shouldFocus: true });
+        return;
+      }
+    } catch {
+      // The server validates availability again when creating the account.
+    }
     setAccountData(data);
     go(S_PATH);
   });
@@ -271,16 +285,13 @@ export default function RegisterWizard({
       setError("Please choose a path to continue.");
       return;
     }
-    go(S_PERSONAL);
+    if (path === "ATTENDEE") void submitAttendee();
+    else go(S_PERSONAL);
   };
 
   const onPersonalNext = personalForm.handleSubmit((data) => {
     setPersonalData(data);
-    if (path === "ATTENDEE") {
-      void submitAttendee(data);
-    } else {
-      go(S_ORGANIZER_TYPE);
-    }
+    go(S_ORGANIZER_TYPE);
   });
 
   const onOrganizerTypeNext = () => {
@@ -301,11 +312,12 @@ export default function RegisterWizard({
 
   // ── Submit helpers ─────────────────────────────────────────────────────────
 
-  const redirectUrl = callbackUrl
-    ? `/login?registered=true&callbackUrl=${encodeURIComponent(callbackUrl)}`
-    : "/login?registered=true";
+  const verificationCallback = path === "ORGANIZER"
+    ? `/complete-profile?intent=organizer&callbackUrl=${encodeURIComponent(callback)}`
+    : callback;
+  const redirectUrl = `/check-email?email=${encodeURIComponent(accountData?.email ?? "")}&callbackUrl=${encodeURIComponent(verificationCallback)}`;
 
-  const submitAttendee = async (personal: PersonalData) => {
+  const submitAttendee = async () => {
     if (!accountData) return;
     setSubmitting(true);
     setError(null);
@@ -315,13 +327,7 @@ export default function RegisterWizard({
         email: payload.email,
         name: payload.username,
         password: payload.password,
-        legalName: personal.legalName,
-        addressLine1: personal.addressLine1,
-        addressLine2: personal.addressLine2 || null,
-        addressCity: personal.addressCity,
-        addressState: personal.addressState || null,
-        addressPostalCode: personal.addressPostalCode,
-        addressCountry: personal.addressCountry,
+        callbackURL: callback,
       });
       if (error) {
         setError(error.message || "Registration failed");
@@ -348,6 +354,7 @@ export default function RegisterWizard({
           email: account.email,
           username: account.username,
           password: account.password,
+          callbackURL: callback,
           ...personalData,
           organizerType,
           ...(org
@@ -372,11 +379,30 @@ export default function RegisterWizard({
     }
   };
 
+  const signUpSocial = async (provider: "google" | "github") => {
+    setSocialProvider(provider);
+    setError(null);
+    try {
+      const result = await authClient.signIn.social({
+        provider,
+        callbackURL: callback,
+        newUserCallbackURL: `/complete-profile?callbackUrl=${encodeURIComponent(callback)}`,
+      });
+      if (result.error) {
+        setError(result.error.message || "Sign-up could not start. Please try again.");
+        setSocialProvider(null);
+      }
+    } catch {
+      setError("Connection interrupted. Please try again.");
+      setSocialProvider(null);
+    }
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <Box>
-      <Stepper activeStep={step} alternativeLabel sx={{ mb: 4 }}>
+    <Box ref={contentRef} tabIndex={-1} aria-label={`Registration: ${steps[step]}`} sx={{ outline: "none" }}>
+      <Stepper activeStep={step} alternativeLabel sx={{ mb: 4, '& .MuiStepLabel-label': { fontSize: { xs: '0.7rem', sm: '0.875rem' }, wordBreak: 'break-word' }, '& .MuiStep-root': { px: { xs: 0.5, sm: 1 } } }}>
         {steps.map((label) => (
           <Step key={label}>
             <StepLabel>{label}</StepLabel>
@@ -392,6 +418,13 @@ export default function RegisterWizard({
 
       {/* ── Step 0: Account ─────────────────────────────────────────────── */}
       {step === S_ACCOUNT && (
+        <>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }}>
+            <Button fullWidth variant="outlined" color="secondary" startIcon={<Google />} disabled={!!socialProvider} onClick={() => void signUpSocial("google")}>Continue with Google</Button>
+            <Button fullWidth variant="outlined" color="secondary" startIcon={<GitHub />} disabled={!!socialProvider} onClick={() => void signUpSocial("github")}>Continue with GitHub</Button>
+          </Stack>
+          {socialProvider && <Typography role="status" variant="body2" textAlign="center" sx={{ mb: 2 }}>Opening {socialProvider === "google" ? "Google" : "GitHub"}…</Typography>}
+          <Divider sx={{ mb: 2 }}><Typography variant="body2" color="text.secondary">or use your email</Typography></Divider>
         <Box
           component="form"
           onSubmit={(e) => void onAccountNext(e)}
@@ -402,6 +435,7 @@ export default function RegisterWizard({
             required
             fullWidth
             label="Email"
+            type="email"
             autoComplete="email"
             {...accountForm.register("email")}
             error={!!accountForm.formState.errors.email}
@@ -419,7 +453,7 @@ export default function RegisterWizard({
             error={!!accountForm.formState.errors.username}
             helperText={
               accountForm.formState.errors.username?.message ||
-              `${username.length}/${DISPLAY_NAME_MAX_LENGTH}`
+              "Your public name. Letters, numbers, dots, hyphens and underscores."
             }
           />
 
@@ -432,7 +466,7 @@ export default function RegisterWizard({
             autoComplete="new-password"
             {...accountForm.register("password")}
             error={!!accountForm.formState.errors.password}
-            helperText={accountForm.formState.errors.password?.message || " "}
+            helperText={accountForm.formState.errors.password?.message || "At least 8 characters, one uppercase letter and one number."}
             slotProps={{
               input: {
                 endAdornment: (
@@ -457,21 +491,6 @@ export default function RegisterWizard({
             setWarning={setPwWarning}
           />
 
-          {pwWarning?.message && (
-            <Alert severity="warning" sx={{ mb: 1 }}>
-              <Typography variant="body2">{pwWarning.message}</Typography>
-              {pwWarning.suggestions.length > 0 && (
-                <Box component="ul" sx={{ mt: 1, mb: 0, pl: 2 }}>
-                  {pwWarning.suggestions.map((s) => (
-                    <Typography component="li" variant="body2" key={s}>
-                      {s}
-                    </Typography>
-                  ))}
-                </Box>
-              )}
-            </Alert>
-          )}
-
           <TextField
             margin="normal"
             required
@@ -491,13 +510,14 @@ export default function RegisterWizard({
             fullWidth
             variant="contained"
             size="large"
-            disabled={!!pwWarning}
+            disabled={!!pwWarning || accountForm.formState.isSubmitting || !!socialProvider}
             endIcon={<ArrowForward />}
             sx={{ mt: 3, mb: 1, py: 1.5 }}
           >
-            Continue
+            {accountForm.formState.isSubmitting ? "Checking…" : "Continue"}
           </Button>
         </Box>
+        </>
       )}
 
       {/* ── Step 1: Path selection ───────────────────────────────────────── */}
@@ -510,7 +530,7 @@ export default function RegisterWizard({
             You can always change this later.
           </Typography>
 
-          <Grid container spacing={2}>
+          <Grid container spacing={2} role="radiogroup" aria-label="How will you use Ventry?">
             <Grid size={{ xs: 12, sm: 6 }}>
               <SelectionCard
                 selected={path === "ATTENDEE"}
@@ -539,6 +559,7 @@ export default function RegisterWizard({
           >
             <Button
               onClick={() => go(S_ACCOUNT)}
+              disabled={submitting}
               startIcon={<ArrowBack />}
               variant="text"
             >
@@ -546,12 +567,13 @@ export default function RegisterWizard({
             </Button>
             <Button
               onClick={onPathNext}
+              disabled={submitting}
               variant="contained"
               size="large"
               endIcon={<ArrowForward />}
               sx={{ py: 1.25 }}
             >
-              Continue
+              {submitting ? "Creating account…" : path === "ATTENDEE" ? "Create account" : "Continue"}
             </Button>
           </Stack>
         </Box>
@@ -565,16 +587,14 @@ export default function RegisterWizard({
           noValidate
         >
           <Alert severity="info" sx={{ mb: 2 }}>
-            {path === "ATTENDEE"
-              ? "Your legal name and address are protected personal data. They are not shown publicly; check-in staff may see your legal name when verifying ID at the door."
-              : "Your legal details are used for billing and compliance purposes and are not shown publicly."}
+            Your legal details are used for billing and compliance purposes and are not shown publicly.
           </Alert>
 
           <TextField
             margin="normal"
             required
             fullWidth
-            label={path === "ORGANIZER" ? "Legal / Organization name" : "Legal name"}
+            label="Legal / Organization name"
             autoComplete="name"
             inputProps={{ maxLength: 200 }}
             {...personalForm.register("legalName")}
@@ -694,20 +714,10 @@ export default function RegisterWizard({
               variant="contained"
               size="large"
               disabled={submitting}
-              endIcon={
-                submitting ? (
-                  <CircularProgress size={18} />
-                ) : path === "ATTENDEE" ? undefined : (
-                  <ArrowForward />
-                )
-              }
+              endIcon={<ArrowForward />}
               sx={{ py: 1.25 }}
             >
-              {path === "ATTENDEE"
-                ? submitting
-                  ? "Creating account…"
-                  : "Create account"
-                : "Continue"}
+              Continue
             </Button>
           </Stack>
         </Box>
@@ -724,7 +734,7 @@ export default function RegisterWizard({
             you build a team with scoped permissions.
           </Typography>
 
-          <Grid container spacing={2}>
+          <Grid container spacing={2} role="radiogroup" aria-label="Organizer type">
             <Grid size={{ xs: 12, sm: 6 }}>
               <SelectionCard
                 selected={organizerType === "INDIVIDUAL"}
@@ -814,7 +824,7 @@ export default function RegisterWizard({
             placeholder="my-organization"
             {...orgForm.register("orgSlug", {
               onChange: () => {
-                slugManuallyEdited.current = true;
+                setSlugManuallyEdited(true);
               },
             })}
             error={!!orgForm.formState.errors.orgSlug}
@@ -880,7 +890,7 @@ export default function RegisterWizard({
           Already have an account?{" "}
           <Box
             component="a"
-            href="/login"
+            href={`/login?callbackUrl=${encodeURIComponent(callback)}`}
             sx={{ color: "primary.main", textDecoration: "none", "&:hover": { textDecoration: "underline" } }}
           >
             Sign in

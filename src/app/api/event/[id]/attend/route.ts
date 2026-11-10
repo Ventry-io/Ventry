@@ -5,6 +5,7 @@ import { findHotelByRoomProductId, normalizeStayPolicy, resolveStayFee } from "@
 import { Prisma } from "@/generated/prisma";
 import { decrementProductStock, getOrInitProductStock, incrementProductStock } from "@/lib/redis";
 import { countActiveRegistrations, releaseExpiredPendingRegistrations } from "@/lib/events/registration-capacity";
+import { hasCheckInIdentity, hasBillingAddress } from "@/lib/user/profile-completion";
 
 const availabilityEventInclude = {
     products: {
@@ -116,6 +117,14 @@ export async function POST(
         const session = await getSession();
         if (!session?.user) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        }
+
+        const identity = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { legalName: true, addressLine1: true, addressCity: true, addressPostalCode: true, addressCountry: true },
+        });
+        if (!identity || !hasCheckInIdentity(identity) || !hasBillingAddress(identity)) {
+            return NextResponse.json({ error: "Add your legal name and billing address before booking a ticket." }, { status: 422 });
         }
 
         const eventId = Number((await params).id);

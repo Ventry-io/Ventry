@@ -767,7 +767,7 @@ export default function RegistrationWizard({
                     ? 'Only newly added extras will create an additional payment.'
                     : !canProceedToPayment
                       ? 'Registration will be submitted for approval. Payment will unlock after an admin approves it.'
-                      : 'Payment will be handled at the convention or via bank transfer instructions sent to your email.'}
+                      : 'Payment will be handled at the event or via bank transfer instructions sent to your email.'}
                 </Alert>
               </Box>
             )}

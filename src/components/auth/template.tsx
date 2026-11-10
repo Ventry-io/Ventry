@@ -10,6 +10,8 @@ import {
 import Link from "next/link";
 import MuiLink from "@mui/material/Link";
 import ForgotPassword from "./ForgotPassword";
+import { useSearchParams } from "next/navigation";
+import { getCallbackPath } from "@/lib/auth/callback";
 
 export interface AuthTemplateProps {
     children: React.ReactNode;
@@ -71,11 +73,12 @@ const AlreadyRegistered = () => {
 };
 
 const NotYetRegistered = () => {
+    const callbackUrl = getCallbackPath(useSearchParams().get("callbackUrl"));
     return (
         <Box sx={{ mt: 3, textAlign: 'center', width: '100%' }}>
             <Typography variant="body2">
                 Not yet registered?{' '}
-                <Link href="/register" passHref>
+                <Link href={`/register?callbackUrl=${encodeURIComponent(callbackUrl)}`} passHref>
                     <MuiLink component="span" variant="body2">
                         Register here
                     </MuiLink>

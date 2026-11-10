@@ -4,6 +4,8 @@ import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
 import Skeleton from "@mui/material/Skeleton";
 import Divider from "@mui/material/Divider";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
 import {
     People,
     VerifiedUser,
@@ -14,11 +16,14 @@ import {
 } from "@mui/icons-material";
 import StatCard from "@/components/admin/StatCard/StatCard";
 import { prisma } from "@/lib/prisma/prisma";
-import { checkAdminAuth, adminEventFilter } from "@/lib/auth/admin";
+import { checkAdminAuth, adminEventFilter, getAdminFinanceAccess } from "@/lib/auth/admin";
 import { redirect } from "next/navigation";
 
 async function getDashboardStats(adminId: string, orgScope?: string) {
-    const eventFilter = await adminEventFilter(adminId, orgScope);
+    const [eventFilter, financeAccess] = await Promise.all([
+        adminEventFilter(adminId, orgScope),
+        getAdminFinanceAccess(adminId, orgScope),
+    ]);
 
     const [
         totalRegistrants,
@@ -53,13 +58,13 @@ async function getDashboardStats(adminId: string, orgScope?: string) {
             where: eventFilter,
             _count: { _all: true },
         }),
-        prisma.payment.aggregate({
+        financeAccess.eventFilter ? prisma.payment.aggregate({
             _sum: { amount: true },
             where: {
                 paymentStatus: "COMPLETED",
-                registration: { event: eventFilter },
+                registration: { event: financeAccess.eventFilter },
             },
-        }),
+        }) : null,
     ]);
 
     const eventCounts = Object.fromEntries(
@@ -74,7 +79,8 @@ async function getDashboardStats(adminId: string, orgScope?: string) {
         draftEvents: eventCounts.DRAFT ?? 0,
         publishedEvents: eventCounts.PUBLISHED ?? 0,
         cancelledEvents: eventCounts.CANCELLED ?? 0,
-        totalRevenue: revenue._sum.amount ?? 0,
+        totalRevenue: revenue ? revenue._sum.amount ?? 0 : null,
+        hasRestrictedFinances: financeAccess.hasRestrictedOrganizations,
     };
 }
 
@@ -149,15 +155,34 @@ async function DashboardStats({ adminId, orgScope }: { adminId: string; orgScope
                 <Typography variant="h6" fontWeight={600} color="text.secondary" sx={{ mt: 2 }}>Revenue</Typography>
                 <Divider sx={{ mt: 0.5, mb: 2 }} />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                <StatCard
-                    label="Total Revenue (completed)"
-                    value={`€ ${stats.totalRevenue.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                    Icon={AttachMoney}
-                    color="success.main"
-                    sub="See Billing for full breakdown"
-                />
-            </Grid>
+            {stats.totalRevenue === null ? (
+                <Grid size={12}>
+                    <Alert severity="info">
+                        <AlertTitle>Finance access required</AlertTitle>
+                        You don’t have access to this organization’s finances. Ask the organization owner to grant you the Finances permission.
+                    </Alert>
+                </Grid>
+            ) : (
+                <>
+                    {stats.hasRestrictedFinances && (
+                        <Grid size={12}>
+                            <Alert severity="info">
+                                Some organization finances are hidden because you don’t have the Finances permission.
+                                Revenue below includes only events whose finances you can access. Ask the organization owner for access.
+                            </Alert>
+                        </Grid>
+                    )}
+                    <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+                        <StatCard
+                            label="Total Revenue (completed)"
+                            value={`€ ${stats.totalRevenue.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            Icon={AttachMoney}
+                            color="success.main"
+                            sub="See Billing for full breakdown"
+                        />
+                    </Grid>
+                </>
+            )}
         </>
     );
 }

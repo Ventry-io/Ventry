@@ -16,7 +16,7 @@ vi.mock("@/lib/auth/session", () => ({
   getSession: vi.fn(),
 }));
 
-import { PATCH } from "@/app/api/user/username/route";
+import { GET, PATCH } from "@/app/api/user/username/route";
 import { getSession } from "@/lib/auth/session";
 
 const mockedGetSession = getSession as unknown as ReturnType<typeof vi.fn>;
@@ -37,6 +37,19 @@ beforeEach(() => {
 });
 
 describe("PATCH /api/user/username", () => {
+  it("checks public username availability without caching the result", async () => {
+    prismaMock.user.findFirst.mockResolvedValue(null);
+    prismaMock.usernameHistory.findFirst.mockResolvedValue(null);
+    const res = await GET(new NextRequest("http://localhost/api/user/username?username=available-name"));
+    expect(await res.json()).toEqual({ available: true });
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects unsafe username characters before querying availability", async () => {
+    const res = await GET(new NextRequest("http://localhost/api/user/username?username=bad%2Fname"));
+    expect(res.status).toBe(400);
+    expect(prismaMock.user.findFirst).not.toHaveBeenCalled();
+  });
   it("401s when unauthenticated", async () => {
     mockedGetSession.mockResolvedValue(null);
     const res = await PATCH(patchRequest({ username: "new-name" }));

@@ -15,6 +15,7 @@ export async function checkEventAdminAuth(
   eventId: number,
   requestHeaders?: Headers,
   requiredPermission?: AdminOrgPermission,
+  requireWrite = false,
 ): Promise<EventAdminAuthResult> {
-  return _checkEventAdminAuth(eventId, requiredPermission, requestHeaders);
+  return _checkEventAdminAuth(eventId, requiredPermission, requestHeaders, requireWrite);
 }

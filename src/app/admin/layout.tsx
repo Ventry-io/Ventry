@@ -5,7 +5,6 @@ import { Container, Box, Drawer, List, ListItem, ListItemButton, ListItemIcon, L
 import { Event, Dashboard, People, Settings, Home, SupportAgent, Payments, ChevronLeft, ChevronRight, Business } from "@mui/icons-material";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import AppHeader from "@/components/common/AppHeader/AppHeader";
 import AdminOrgFilterSelect from "@/components/admin/AdminOrgFilterSelect";
 
 const drawerWidth = 240;
@@ -14,7 +13,7 @@ const collapsedDrawerWidth = 72;
 const primaryLinks = [
   { href: "/admin", label: "Dashboard", Icon: Dashboard },
   { href: "/admin/events", label: "Events", Icon: Event },
-  { href: "/admin/organization", label: "Organization", Icon: Business },
+  { href: "/admin/organization", label: "Organization & crew", Icon: Business },
   { href: "/admin/users", label: "Users", Icon: People },
   { href: "/admin/tickets", label: "Tickets", Icon: SupportAgent },
   { href: "/admin/billing", label: "Billing", Icon: Payments },
@@ -101,7 +100,6 @@ export default function AdminLayout({
           },
         }}
       >
-        <AppHeader />
         <Toolbar />
         <Box sx={{ display: "flex", justifyContent: expanded ? "flex-end" : "center", px: 1, py: 1 }}>
           <Tooltip title={expanded ? "Collapse navigation" : "Expand navigation"} placement="right">

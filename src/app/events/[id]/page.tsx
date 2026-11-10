@@ -31,6 +31,7 @@ import CommunitySection from "@/components/events/community/CommunitySection";
 import type { SerializedEvent, SerializedProduct } from "@/types/event";
 import { Suspense } from "react";
 import PageLoadingState from "@/components/common/PageLoadingState";
+import { hasCheckInIdentity, hasBillingAddress } from "@/lib/user/profile-completion";
 import { AttendeeCard } from "./AttendeeCard";
 
 const eventDateFormatter = new Intl.DateTimeFormat("en-US");
@@ -61,6 +62,10 @@ async function EventDetailPageContent({
 
   const { message } = await searchParams;
   const session = await getSession();
+  const bookingIdentity = session?.user ? await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { legalName: true, addressLine1: true, addressCity: true, addressPostalCode: true, addressCountry: true },
+  }) : null;
 
   const event = await prisma.event.findFirst({
     where: { 
@@ -152,6 +157,7 @@ async function EventDetailPageContent({
 
   const startDate = new Date(event.startDate);
   const endDate = new Date(event.endDate);
+  // eslint-disable-next-line react-hooks/purity -- Request-time calculation in an async server component.
   const eventEnded = endDate.getTime() < Date.now();
   const serializedProducts = event.products.map(p => ({
     id: p.id,
@@ -431,6 +437,14 @@ async function EventDetailPageContent({
                   />
                 ) : (
                   <>
+                    {(!bookingIdentity || !hasCheckInIdentity(bookingIdentity) || !hasBillingAddress(bookingIdentity)) && (
+                      <Alert severity="info" sx={{ mb: 2 }}>
+                        Booking requires your legal name and billing address. Add them before ticket sales open to avoid delays. Preparing your details does not reserve a ticket.
+                        <Button fullWidth size="small" sx={{ mt: 1 }} href={`/complete-profile?intent=billing&callbackUrl=${encodeURIComponent(`/events/${event.id}`)}`}>
+                          Prepare booking details
+                        </Button>
+                      </Alert>
+                    )}
                     <Button 
                       fullWidth 
                       variant="contained" 
@@ -497,7 +511,7 @@ async function EventDetailPageContent({
                 <Typography variant="h6" gutterBottom>Includes</Typography>
                 <Stack direction="row" flexWrap="wrap" gap={1}>
                   <Chip label="Badge" variant="outlined" />
-                  <Chip label="Convention Access" variant="outlined" />
+                  <Chip label="Event Access" variant="outlined" />
                   <Chip label="Workshops" variant="outlined" />
                   {accommodationHotels.length > 0 && (
                     <Chip label="Hotel Support" variant="outlined" />

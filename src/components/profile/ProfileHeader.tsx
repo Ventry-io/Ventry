@@ -1,236 +1,74 @@
 "use client";
 
-import {
-  Box,
-  Typography,
-  Avatar,
-  Chip,
-  Stack
-} from "@mui/material";
-import { Badge, Telegram, Twitter, PhotoCamera } from "@mui/icons-material";
+import { Box, Typography, Avatar, Chip, Stack } from "@mui/material";
+import Telegram from "@mui/icons-material/Telegram";
+import Twitter from "@mui/icons-material/Twitter";
+import Instagram from "@mui/icons-material/Instagram";
 import Image from "next/image";
 import { getCountryFlag, getCountryByCode } from "@/lib/countries";
-
-interface ProfilePicture {
-  id: string;
-  signedUrl?: string | null;
-  isPrimary: boolean;
-  createdAt: Date | string;
-}
-
-interface SocialLinks {
-  telegram?: string;
-  twitter?: string;
-  instagram?: string;
-}
 
 interface ProfileHeaderProps {
   name: string | null;
   username?: string | null;
   pronouns: string | null;
-  profilePictures: ProfilePicture[];
+  profilePictures: Array<{ signedUrl?: string | null; isPrimary: boolean }>;
   age: number | null;
   showAge: boolean;
   country?: string | null;
-  socialLinks?: SocialLinks | null;
+  socialLinks?: { telegram?: string; twitter?: string; instagram?: string } | null;
+  eventCounts?: { attended: number; upcoming: number };
 }
-
-function getInitials(name: string | null): string {
-  if (!name) return "?";
-  return name
-    .split(" ")
-    .map(word => word[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-const chipSx = {
-  bgcolor: 'rgba(255,255,255,0.2)',
-  color: 'white',
-  backdropFilter: 'blur(10px)',
-  border: '1px solid rgba(255,255,255,0.3)',
-  cursor: 'pointer',
-  '&:hover': { bgcolor: 'rgba(255,255,255,0.3)' }
-};
 
 export default function ProfileHeader({
-  name,
-  username,
-  pronouns,
-  profilePictures,
-  age,
-  showAge,
-  country,
-  socialLinks
+  name, username, pronouns, profilePictures, age, showAge, country, socialLinks, eventCounts,
 }: ProfileHeaderProps) {
   const primaryPicture = profilePictures.find(pic => pic.isPrimary) || profilePictures[0];
   const countryData = country ? getCountryByCode(country) : null;
-  const hasSocials = socialLinks && (socialLinks.telegram || socialLinks.twitter || socialLinks.instagram);
+  const initials = name?.trim().split(/\s+/).map(word => word[0]).join('').toUpperCase().slice(0, 2) || '?';
 
   return (
-    <Box
-      sx={{
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        color: 'white',
-        p: 4,
-        position: 'relative'
-      }}
-    >
-      <Stack
-        direction={{ xs: 'column', sm: 'row' }}
-        spacing={4}
-        alignItems={{ xs: 'center', sm: 'flex-start' }}
-      >
-        <Box sx={{ flexShrink: 0 }}>
-          <Avatar
-            sx={{
-              width: { xs: 150, sm: 180, md: 200 },
-              height: { xs: 150, sm: 180, md: 200 },
-              border: '6px solid white',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
-              transition: 'transform 0.2s ease-in-out',
-              '&:hover': { transform: 'scale(1.02)' }
-            }}
-          >
-            {primaryPicture?.signedUrl ? (
-              <Image
-                src={primaryPicture.signedUrl}
-                alt={`${name || 'User'}'s profile`}
-                width={200}
-                height={200}
-                style={{ objectFit: 'cover' }}
-                unoptimized={true}
-                priority
-              />
-            ) : (
-              <Typography variant="h1" sx={{ fontSize: '4rem', fontWeight: 'bold' }}>
-                {getInitials(name)}
-              </Typography>
-            )}
-          </Avatar>
-        </Box>
-
-        <Box sx={{
-          flex: 1,
-          textAlign: { xs: 'center', sm: 'left' },
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          minHeight: { sm: 180, md: 200 }
-        }}>
-          <Typography
-            variant="h3"
-            sx={{
-              mb: 1,
-              fontWeight: 'bold',
-              fontSize: { xs: '2rem', sm: '2.5rem', md: '3rem' },
-              textShadow: '0 2px 4px rgba(0,0,0,0.3)'
-            }}
-          >
-            {name || 'Anonymous User'}
-          </Typography>
-
-          {username && (
-            <Typography
-              variant="body1"
-              sx={{ mb: 2, opacity: 0.85, fontWeight: 500 }}
-            >
-              @{username}
-            </Typography>
-          )}
-
-          <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2, justifyContent: { xs: 'center', sm: 'flex-start' } }}>
-            {pronouns && (
-              <Chip
-                icon={<Badge />}
-                label={pronouns}
-                sx={{
-                  ...chipSx,
-                  cursor: 'default',
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' },
-                  fontSize: '0.9rem',
-                  py: 1,
-                  px: 2,
-                }}
-              />
-            )}
-            {countryData && (
-              <Chip
-                label={`${getCountryFlag(countryData.code)} ${countryData.name}`}
-                sx={{
-                  ...chipSx,
-                  cursor: 'default',
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.2)' },
-                  fontSize: '0.9rem',
-                }}
-              />
-            )}
-          </Stack>
-
-          {hasSocials && (
-            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2, justifyContent: { xs: 'center', sm: 'flex-start' } }}>
-              {socialLinks.telegram && (
-                <Chip
-                  icon={<Telegram />}
-                  label={`@${socialLinks.telegram}`}
-                  component="a"
-                  href={`https://t.me/${socialLinks.telegram}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={chipSx}
-                  clickable
-                />
-              )}
-              {socialLinks.twitter && (
-                <Chip
-                  icon={<Twitter />}
-                  label={`@${socialLinks.twitter}`}
-                  component="a"
-                  href={`https://x.com/${socialLinks.twitter}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={chipSx}
-                  clickable
-                />
-              )}
-              {socialLinks.instagram && (
-                <Chip
-                  icon={<PhotoCamera />}
-                  label={`@${socialLinks.instagram}`}
-                  component="a"
-                  href={`https://instagram.com/${socialLinks.instagram}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={chipSx}
-                  clickable
-                />
-              )}
+    <Box>
+      <Box sx={{ height: { xs: 88, sm: 120 }, bgcolor: 'primary.main', backgroundImage: 'linear-gradient(115deg, #0d3155, #1976d2)' }} />
+      <Box sx={{ px: { xs: 2.5, sm: 4 }, pb: 3 }}>
+        <Avatar sx={{ width: 128, height: 128, mt: -8, mb: 2, border: '5px solid', borderColor: 'background.paper', bgcolor: 'primary.dark', fontSize: 40 }}>
+          {primaryPicture?.signedUrl ? (
+            <Image src={primaryPicture.signedUrl} alt={`${name || 'User'}'s profile`} fill sizes="128px" style={{ objectFit: 'cover' }} unoptimized preload />
+          ) : initials}
+        </Avatar>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} justifyContent="space-between" alignItems={{ sm: 'center' }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography component="h1" variant="h4" fontWeight={800} sx={{ overflowWrap: 'anywhere' }}>{name || 'Anonymous User'}</Typography>
+            {username && <Typography color="text.secondary" sx={{ mt: 0.5, overflowWrap: 'anywhere' }}>@{username}</Typography>}
+            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 1.5 }}>
+              {pronouns && <Chip label={pronouns} size="small" variant="outlined" />}
+              {countryData && <Chip label={`${getCountryFlag(countryData.code)} ${countryData.name}`} size="small" variant="outlined" />}
+              {age !== null && showAge && <Chip label={`${age} years old`} size="small" variant="outlined" />}
+            </Stack>
+          </Box>
+          {eventCounts && (
+            <Stack direction="row" spacing={3} sx={{ flexShrink: 0 }}>
+              {[
+                { label: 'Attended', value: eventCounts.attended, href: '#attended-events' },
+                { label: 'Upcoming', value: eventCounts.upcoming, href: '#upcoming-events' },
+              ].map(stat => (
+                <Box component="a" key={stat.label} href={stat.href} sx={{ color: 'inherit', textDecoration: 'none', textAlign: 'center', borderRadius: 1, px: 1, '&:hover': { bgcolor: 'action.hover' } }}>
+                  <Typography variant="h5" component="span" fontWeight={800} sx={{ display: 'block' }}>{stat.value}</Typography>
+                  <Typography variant="body2" component="span" color="text.secondary">{stat.label}</Typography>
+                </Box>
+              ))}
             </Stack>
           )}
-
-          <Stack direction="row" spacing={3} sx={{ mt: 1 }}>
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                {profilePictures.length}
-              </Typography>
-              <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                {profilePictures.length === 1 ? 'Photo' : 'Photos'}
-              </Typography>
-            </Box>
-            {age && showAge && (
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                  {age}
-                </Typography>
-                <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                  Years Old
-                </Typography>
-              </Box>
-            )}
-          </Stack>
-        </Box>
-      </Stack>
+        </Stack>
+        <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 2, '&:empty': { display: 'none' } }}>
+          {[
+            { handle: socialLinks?.telegram, base: 'https://t.me/', Icon: Telegram, label: 'Telegram' },
+            { handle: socialLinks?.twitter, base: 'https://x.com/', Icon: Twitter, label: 'Twitter / X' },
+            { handle: socialLinks?.instagram, base: 'https://instagram.com/', Icon: Instagram, label: 'Instagram' },
+          ].map(({ handle, base, Icon, label }) => handle?.trim() ? (
+            <Chip key={label} icon={<Icon />} label={`@${handle}`} aria-label={`${label}: @${handle}`} component="a" href={`${base}${encodeURIComponent(handle.trim().replace(/^@/, ''))}`} target="_blank" rel="noopener noreferrer" variant="outlined" size="small" clickable sx={{ maxWidth: '100%' }} />
+          ) : null)}
+        </Stack>
+      </Box>
     </Box>
   );
 }

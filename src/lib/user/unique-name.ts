@@ -1,13 +1,14 @@
 import { prisma } from "@/lib/prisma/prisma";
+import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
 
 const MAX_ATTEMPTS = 50;
 
 /**
  * `User.username` doubles as the public profile slug at /profile/[username],
- * so it can't contain spaces. Collapses any whitespace run into a single hyphen.
+ * so it uses letters, numbers, dots, hyphens and underscores only.
  */
 export function sanitizeUsername(raw: string): string {
-    return raw.trim().replace(/\s+/g, "-");
+    return raw.trim().replace(/[^\p{L}\p{N}_.-]+/gu, "-");
 }
 
 /**
@@ -41,11 +42,12 @@ export async function isUsernameAvailable(username: string, excludeUserId?: stri
  * numeric suffix until a free (and non-reserved) username is found.
  */
 export async function resolveUniqueUsername(candidate: string): Promise<string> {
-    const base = sanitizeUsername(candidate);
+    const sanitized = sanitizeUsername(candidate);
+    const base = (sanitized.length >= 3 ? sanitized : `${sanitized || "user"}-user`).slice(0, DISPLAY_NAME_MAX_LENGTH);
     let username = base;
     for (let suffix = 2; suffix <= MAX_ATTEMPTS; suffix++) {
         if (await isUsernameAvailable(username)) return username;
-        username = `${base}-${suffix}`;
+        username = `${base.slice(0, DISPLAY_NAME_MAX_LENGTH - String(suffix).length - 1)}-${suffix}`;
     }
-    return `${base}-${crypto.randomUUID().slice(0, 8)}`;
+    return `${base.slice(0, DISPLAY_NAME_MAX_LENGTH - 9)}-${crypto.randomUUID().slice(0, 8)}`;
 }

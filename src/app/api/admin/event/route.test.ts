@@ -192,6 +192,28 @@ describe("App Router: /api/admin/event", () => {
         expect(mockedTransaction).not.toHaveBeenCalled();
     });
 
+    it("creates a ticket-only event without accommodation using real validation", async () => {
+        const { adminCreateEventSchema: realSchema } = await vi.importActual<typeof import("@/types/schemas/event/admin")>("@/types/schemas/event/admin");
+        const input = eventInput({ stayPolicy: undefined });
+        input.products = input.products.filter(product => product.type === "TICKET");
+        mockedCreateParse.mockImplementationOnce(body => realSchema.parse(body));
+        mockedCreate.mockResolvedValue({ id: 9, name: input.name });
+
+        const response = await adminRoute.POST(postRequest("http://localhost/api/admin/event", input));
+
+        expect(response.status).toBe(201);
+        const { data } = mockedCreate.mock.calls[0][0];
+        expect(data.ownerId).toBe("admin-1");
+        expect(data.stayPolicy).toEqual({
+            version: 2,
+            mainLocationIsAccommodation: false,
+            allowOverflowHotels: false,
+            samePolicyAcrossHotels: false,
+            hotels: [],
+        });
+        expect(data.products.create).toEqual([expect.objectContaining({ type: "TICKET", price: 100 })]);
+    });
+
     it("repairs a drifted Event id sequence and retries event creation once", async () => {
         const input = eventInput();
         const sequenceError = new Prisma.PrismaClientKnownRequestError(

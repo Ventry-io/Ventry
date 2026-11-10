@@ -19,6 +19,7 @@ import { green } from "@mui/material/colors";
 import type { PendingAccountLink } from "@/generated/prisma";
 import authClient from "@/lib/auth/client";
 import LastUsedIndicator from "./LastUsedIndicator";
+import { getCallbackPath } from "@/lib/auth/callback";
 
 export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
     const [formData, setFormData] = useState({
@@ -111,7 +112,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             }
 
             // No pending links, go to home or callback URL
-            router.push(callbackUrl || "/");
+            router.push(getCallbackPath(callbackUrl));
 
         } catch(err: unknown) {
             if(err instanceof Error) {
@@ -190,6 +191,11 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                     }}
                 />
                 <LastUsedIndicator loginMethod="email" />
+                {error && (
+                    <Button href={`/check-email?email=${encodeURIComponent(formData.email)}&callbackUrl=${encodeURIComponent(getCallbackPath(callbackUrl))}`}>
+                        Need a new email confirmation link?
+                    </Button>
+                )}
                 <Button
                     // type={(loading || success) ? "button" : "submit"}
                     type="submit"

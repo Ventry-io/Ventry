@@ -2,6 +2,7 @@ interface EmailVerificationMailProps {
     userName: string;
     verificationUrl: string;
     expiryHours?: number;
+    newEmail?: string;
 }
 
 const emailStyles = {
@@ -98,7 +99,8 @@ const emailStyles = {
 export default function EmailVerificationMail({ 
     userName, 
     verificationUrl, 
-    expiryHours = 24 
+    expiryHours = 24,
+    newEmail,
 }: EmailVerificationMailProps) {
     return (
         <div style={emailStyles.container}>
@@ -108,21 +110,22 @@ export default function EmailVerificationMail({
             </div>
 
             {/* Main Content */}
-            <h1 style={emailStyles.title}>Verify Your Email Address</h1>
+            <h1 style={emailStyles.title}>{newEmail ? 'Confirm Your Email Change' : 'Verify Your Email Address'}</h1>
             
             <p style={emailStyles.text}>
                 Hi {userName},
             </p>
 
             <p style={emailStyles.text}>
-                Thank you for signing up for Ventry! To complete your registration and secure your account, 
-                please verify your email address by clicking the button below.
+                {newEmail
+                    ? <>You requested to change your Ventry email address to <strong>{newEmail}</strong>. Approve this request below. We will then send a verification link to your new address. Your email stays unchanged until you verify it.</>
+                    : 'To secure your Ventry account, please verify your email address by clicking the button below.'}
             </p>
 
             {/* CTA Button */}
             <div style={emailStyles.buttonContainer}>
                 <a href={verificationUrl} style={emailStyles.button}>
-                    Verify Email Address
+                    {newEmail ? 'Confirm Email Change' : 'Verify Email Address'}
                 </a>
             </div>
 
@@ -146,8 +149,8 @@ export default function EmailVerificationMail({
             <div style={emailStyles.warningBox}>
                 <p style={emailStyles.warningText}>
                     <strong>⚠️ Important:</strong><br />
-                    If you didn&apos;t create an account with Ventry, you can safely ignore this email. 
-                    Your email address will not be added to our system without verification.
+                    If you didn&apos;t request this, you can safely ignore this email.
+                    Your email address will not be changed or verified without confirmation.
                 </p>
             </div>
 

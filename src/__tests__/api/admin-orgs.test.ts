@@ -46,7 +46,7 @@ vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers(
 import { prisma } from "@/lib/prisma/prisma";
 import { checkEventAdminAuth } from "@/lib/auth/admin";
 import { POST as registerAdminPost } from "@/app/api/admin/register/route";
-import { GET as getOrgs, POST as createOrg } from "@/app/api/admin/organizations/route";
+import { POST as createOrg } from "@/app/api/admin/organizations/route";
 import { POST as createInvitation } from "@/app/api/admin/organizations/[id]/invitations/route";
 import { POST as acceptInvitation } from "@/app/api/admin/organizations/[id]/invitations/[token]/accept/route";
 import { PATCH as updateMember, DELETE as removeMember } from "@/app/api/admin/organizations/[id]/members/[adminId]/route";
@@ -264,12 +264,16 @@ describe("POST /api/admin/organizations/[id]/invitations", () => {
 // ---------------------------------------------------------------------------
 describe("POST /api/admin/organizations/[id]/invitations/[token]/accept", () => {
   it("accepting creates membership for existing admin user", async () => {
+    const createMembership = vi.fn();
     getSessionMock.mockResolvedValue({ user: { id: "user-admin" } });
     p.adminInvitation.findUnique.mockResolvedValue({
       id: "inv-1",
       organizationId: ORG_ID,
       invitedEmail: "admin@example.com",
       permissions: [AdminOrgPermission.COMMUNITY],
+      accessLevel: "READ",
+      departmentId: "dept-stage",
+      role: "Stage manager",
       status: AdminInvitationStatus.PENDING,
       expiresAt: new Date(Date.now() + 86_400_000),
     });
@@ -282,9 +286,9 @@ describe("POST /api/admin/organizations/[id]/invitations/[token]/accept", () => 
       fn({
         adminOrganizationMembership: {
           findUnique: vi.fn().mockResolvedValue(null),
-          create: vi.fn(),
+          create: createMembership,
         },
-        adminInvitation: { update: vi.fn() },
+        adminInvitation: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       }),
     );
 
@@ -293,6 +297,21 @@ describe("POST /api/admin/organizations/[id]/invitations/[token]/accept", () => 
       { params: Promise.resolve({ id: ORG_ID, token: "tok-abc" }) },
     );
     expect(res.status).toBe(200);
+    expect(createMembership).toHaveBeenCalledWith({ data: expect.objectContaining({ accessLevel: "READ", departmentId: "dept-stage", role: "Stage manager" }) });
+  });
+
+  it("does not create membership if an invitation is revoked during acceptance", async () => {
+    getSessionMock.mockResolvedValue({ user: { id: "user-admin" } });
+    p.adminInvitation.findUnique.mockResolvedValue({ id: "inv-1", organizationId: ORG_ID, invitedEmail: "admin@example.com", permissions: [], status: AdminInvitationStatus.PENDING, expiresAt: new Date(Date.now() + 86_400_000) });
+    p.user.findUnique.mockResolvedValue({ email: "admin@example.com", isAdmin: true, adminProfile: { id: "admin-existing" } });
+    const createMembership = vi.fn();
+    p.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn({
+      adminInvitation: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      adminOrganizationMembership: { create: createMembership },
+    }));
+    const res = await acceptInvitation(new NextRequest("http://localhost/", { method: "POST" }), { params: Promise.resolve({ id: ORG_ID, token: "tok-abc" }) });
+    expect(res.status).toBe(409);
+    expect(createMembership).not.toHaveBeenCalled();
   });
 
   it("rejects expired invitation", async () => {

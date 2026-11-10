@@ -13,7 +13,6 @@ import {
   DialogTitle,
   Divider,
   IconButton,
-  MenuItem,
   Stack,
   TextField,
   Tooltip,
@@ -71,7 +70,6 @@ export default function PasskeyManager() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedPasskey, setSelectedPasskey] = useState<Passkey | null>(null);
   const [newPasskeyName, setNewPasskeyName] = useState("");
-  const [newAttachment, setNewAttachment] = useState<"" | "platform" | "cross-platform">("");
   const [editName, setEditName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +91,6 @@ export default function PasskeyManager() {
     if (busy) return;
     setAddOpen(false);
     setNewPasskeyName("");
-    setNewAttachment("");
   };
 
   const closeDetailsDialog = () => {
@@ -115,10 +112,7 @@ export default function PasskeyManager() {
     setSuccess(null);
 
     try {
-      const result = await authClient.passkey.addPasskey({
-        name,
-        ...(newAttachment ? { authenticatorAttachment: newAttachment } : {}),
-      });
+      const result = await authClient.passkey.addPasskey({ name });
 
       if (result.error) {
         setError(getErrorMessage(result.error, "Failed to create passkey."));
@@ -128,7 +122,6 @@ export default function PasskeyManager() {
       setSuccess("Passkey created.");
       setAddOpen(false);
       setNewPasskeyName("");
-      setNewAttachment("");
       await refreshPasskeys();
     } catch (err) {
       console.error("Failed to create passkey:", err);
@@ -294,18 +287,9 @@ export default function PasskeyManager() {
               helperText="Use a name that helps you recognize this device later."
               inputProps={{ maxLength: 80 }}
             />
-            <TextField
-              label="Authenticator type"
-              value={newAttachment}
-              onChange={(event) => setNewAttachment(event.target.value as "" | "platform" | "cross-platform")}
-              select
-              fullWidth
-              helperText="Leave as Any unless you specifically want this device or a roaming security key."
-            >
-              <MenuItem value="">Any authenticator</MenuItem>
-              <MenuItem value="platform">This device</MenuItem>
-              <MenuItem value="cross-platform">Security key or another device</MenuItem>
-            </TextField>
+            <Typography variant="body2" color="text.secondary">
+              Next, your browser will guide you through creating a passkey. You can use your device’s fingerprint or face recognition, screen lock, or a security key, depending on what’s available.
+            </Typography>
           </Stack>
         </DialogContent>
         <DialogActions>

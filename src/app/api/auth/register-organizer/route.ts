@@ -1,3 +1,4 @@
+import { APIError } from "better-auth/api";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma/prisma";
@@ -83,7 +84,9 @@ export async function POST(req: NextRequest) {
   }
 
   // Create user account via better-auth (handles password hashing + email verification)
-  const signUpResult = await (auth.api.signUpEmail as any)({
+  let signUpResult: { user?: { id: string } } | null;
+  try {
+  signUpResult = await (auth.api.signUpEmail as any)({
     body: {
       email: data.email,
       name: data.username,
@@ -97,8 +100,12 @@ export async function POST(req: NextRequest) {
       addressPostalCode: data.addressPostalCode,
       addressCountry: data.addressCountry,
     },
-    headers: new Headers({ "content-type": "application/json" }),
+    headers: req.headers,
   }) as { user?: { id: string } } | null;
+  } catch (error) {
+    if (error instanceof APIError) return NextResponse.json({ error: error.message }, { status: error.statusCode });
+    throw error;
+  }
 
   if (!signUpResult?.user?.id) {
     return NextResponse.json({ error: "Account creation failed" }, { status: 500 });

@@ -236,3 +236,29 @@ describe('Unlinking accounts', () => {
     expect(db.account).toHaveLength(2);
   });
 });
+
+describe('Turnstile authentication boundary', () => {
+  it('blocks direct login and registration requests, including server API calls', async () => {
+    vi.stubEnv('NEXT_PUBLIC_TURNSTILE_SITE_KEY', 'test-site');
+    vi.stubEnv('TURNSTILE_SECRET_KEY', 'test-secret');
+    try {
+      for (const [path, body] of [
+        ['/sign-in/email', { email: 'alice@example.com', password: 'Test-password-123!' }],
+        ['/sign-up/email', { name: 'New user', email: 'new@example.com', password: 'Test-password-123!' }],
+        ['/sign-in/social', { provider: 'google' }],
+      ] as const) {
+        const response = await auth.handler(new Request(`${BASE_URL}/api/auth${path}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', origin: BASE_URL }, body: JSON.stringify(body),
+        }));
+        expect(response.status).toBe(403);
+      }
+      await expect(auth.api.signUpEmail({
+        body: { name: 'New user', email: 'new@example.com', password: 'Test-password-123!' }, asResponse: true,
+      })).rejects.toMatchObject({ statusCode: 403 });
+      expect(db.user).toHaveLength(1);
+    } finally {
+      vi.stubEnv('NEXT_PUBLIC_TURNSTILE_SITE_KEY', '');
+      vi.stubEnv('TURNSTILE_SECRET_KEY', '');
+    }
+  });
+});

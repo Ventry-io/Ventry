@@ -78,6 +78,7 @@ export interface SerializedEvent {
   communityAttendeesOnly?: boolean;
   stayPolicy: SerializedStayPolicy;
   schedule: SerializedScheduleItem[];
+  pageDesign?: unknown;
   location?: SerializedLocation | null;
   products: SerializedProduct[];
   _count?: {

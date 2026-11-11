@@ -61,6 +61,15 @@ export async function PATCH(
 
         const { location, products, ...scalarFields } = validatedData;
 
+        if (products) {
+            const removedBookings = await prisma.product.findMany({
+                where: { eventId: id, id: { notIn: products.flatMap(product => product.id ? [product.id] : []) },
+                    OR: [{ registrationItems: { some: {} } }, { waitlistEntries: { some: {} } }] },
+                select: { id: true },
+            });
+            if (removedBookings.length) return NextResponse.json({ error: "Booked or waitlisted products cannot be removed" }, { status: 409 });
+        }
+
         const event = await prisma.event.update({
             where: { id },
             data: {
@@ -68,6 +77,7 @@ export async function PATCH(
                 stayPolicy: validatedData.stayPolicy as Prisma.InputJsonValue,
                 customFields: validatedData.customFields as Prisma.InputJsonValue,
                 schedule: validatedData.schedule as Prisma.InputJsonValue,
+                pageDesign: validatedData.pageDesign as Prisma.InputJsonValue | undefined,
                 // Handle location update
                 ...(location && {
                     location: {
@@ -77,19 +87,13 @@ export async function PATCH(
                         }
                     }
                 }),
-                // Handle products update - strategy: replace all for simplicity if provided
-                // This can be refined later if needed
                 ...(products && {
                     products: {
-                        deleteMany: {},
-                        create: products.map(p => ({
-                            id: p.id,
-                            name: p.name,
-                            description: p.description,
-                            price: p.price,
-                            type: p.type as "TICKET" | "ACCOMMODATION" | "ADDON",
-                            capacity: p.capacity
-                        }))
+                        deleteMany: { id: { notIn: products.flatMap(product => product.id ? [product.id] : []) } },
+                        upsert: products.map(p => {
+                            const data = { name: p.name, description: p.description, price: p.price, type: p.type, capacity: p.capacity, order: p.order };
+                            return { where: { id: p.id || "" }, create: { ...data, ...(p.id ? { id: p.id } : {}) }, update: data };
+                        })
                     }
                 })
             },
@@ -106,6 +110,9 @@ export async function PATCH(
     } catch (error) {
         if (error instanceof z.ZodError) {
             return NextResponse.json({ error: error.issues }, { status: 422 });
+        }
+        if (typeof error === "object" && error && "code" in error && error.code === "P2003") {
+            return NextResponse.json({ error: "Booked or waitlisted products cannot be removed" }, { status: 409 });
         }
         console.error("Error updating event:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

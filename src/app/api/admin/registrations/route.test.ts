@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const prismaMock = vi.hoisted(() => ({
+    event: { findFirst: vi.fn() },
     registration: {
         findMany: vi.fn(),
     },
@@ -32,6 +33,7 @@ const mockedAdminEventFilter = adminEventFilter as unknown as ReturnType<typeof 
 
 function getRequest(params: Record<string, string> = {}) {
     const url = new URL("http://localhost/api/admin/registrations");
+    url.searchParams.set("eventId", "7");
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     return new NextRequest(url);
 }
@@ -48,6 +50,7 @@ describe("GET /api/admin/registrations — event scoping", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         prismaMock.registration.findMany.mockResolvedValue([]);
+        prismaMock.event.findFirst.mockResolvedValue({ id: 7 });
     });
 
     it("returns 403 when not authorized", async () => {
@@ -65,6 +68,13 @@ describe("GET /api/admin/registrations — event scoping", () => {
         const res = await GET(getRequest());
 
         expect(res.status).toBe(403);
+        expect(prismaMock.registration.findMany).not.toHaveBeenCalled();
+    });
+
+    it.each(["", "invalid", "-1", "1.5"])("rejects missing or invalid event context: %s", async eventId => {
+        mockedCheckAdminAuth.mockResolvedValue({ authorized: true, adminId: "admin-individual" });
+        const response = await GET(getRequest({ eventId }));
+        expect(response.status).toBe(400);
         expect(prismaMock.registration.findMany).not.toHaveBeenCalled();
     });
 
@@ -138,6 +148,16 @@ describe("GET /api/admin/registrations — event scoping", () => {
                 }),
             }),
         );
+    });
+
+    it("rejects an event outside the admin's scope before reading registrations", async () => {
+        mockedCheckAdminAuth.mockResolvedValue({ authorized: true, adminId: "admin-individual" });
+        mockedAdminEventFilter.mockResolvedValue(INDIVIDUAL_FILTER);
+        prismaMock.event.findFirst.mockResolvedValue(null);
+        const response = await GET(getRequest({ eventId: "8" }));
+        expect(response.status).toBe(403);
+        expect(prismaMock.event.findFirst).toHaveBeenCalledWith({ where: { AND: [INDIVIDUAL_FILTER, { id: 8 }] }, select: { id: true } });
+        expect(prismaMock.registration.findMany).not.toHaveBeenCalled();
     });
 
     it("status param is applied alongside event filter", async () => {

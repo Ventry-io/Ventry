@@ -54,6 +54,7 @@ async function RegisterEventPageContent({
   });
 
   if (!event) notFound();
+  if (!event.products.some(product => product.type === "TICKET")) redirect(`/events/${id}`);
 
   // Check if already registered
   const existingRegistration = await prisma.registration.findUnique({

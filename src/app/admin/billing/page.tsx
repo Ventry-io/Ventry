@@ -16,8 +16,8 @@ import RecentPaymentsTable from "./RecentPaymentsTable";
 const fmt = (amount: number) =>
     `€\u202f${amount.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-async function BillingContent({ adminId, orgScope }: { adminId: string; orgScope?: string }) {
-    const data = await getBillingData(adminId, orgScope);
+async function BillingContent({ adminId, orgScope, eventId }: { adminId: string; orgScope?: string; eventId: string }) {
+    const data = await getBillingData(adminId, orgScope, eventId);
     if (!data) {
         return (
             <Grid size={12}>
@@ -133,14 +133,15 @@ async function BillingContent({ adminId, orgScope }: { adminId: string; orgScope
     );
 }
 
-type Props = { searchParams: Promise<{ orgFilter?: string }> };
+type Props = { searchParams: Promise<{ orgFilter?: string; eventId?: string }> };
 
 export default async function AdminBillingPage({ searchParams }: Props) {
     const auth = await checkAdminAuth();
     if (!auth.authorized) redirect("/login");
     if (!auth.adminId) redirect("/unauthorized");
 
-    const { orgFilter } = await searchParams;
+    const { orgFilter, eventId } = await searchParams;
+    if (!eventId) redirect("/admin/events");
 
     return (
         <Box>
@@ -156,7 +157,7 @@ export default async function AdminBillingPage({ searchParams }: Props) {
                         </Grid>
                     ))}
                 >
-                    <BillingContent adminId={auth.adminId} orgScope={orgFilter} />
+                    <BillingContent key={eventId} eventId={eventId} adminId={auth.adminId} orgScope={orgFilter} />
                 </Suspense>
             </Grid>
         </Box>

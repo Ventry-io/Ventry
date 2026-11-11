@@ -4,8 +4,9 @@ import { Suspense, useState } from "react";
 import { Container, Box, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Toolbar, Divider, IconButton, Tooltip } from "@mui/material";
 import { Event, Dashboard, People, Settings, Home, SupportAgent, Payments, ChevronLeft, ChevronRight, Business } from "@mui/icons-material";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import AdminOrgFilterSelect from "@/components/admin/AdminOrgFilterSelect";
+import AdminEventSelect from "@/components/admin/AdminEventSelect";
 
 const drawerWidth = 240;
 const collapsedDrawerWidth = 72;
@@ -13,14 +14,14 @@ const collapsedDrawerWidth = 72;
 const primaryLinks = [
   { href: "/admin", label: "Dashboard", Icon: Dashboard },
   { href: "/admin/events", label: "Events", Icon: Event },
-  { href: "/admin/organization", label: "Organization & crew", Icon: Business },
+  { href: "/admin/organization", label: "Organization: settings & crew", Icon: Business },
   { href: "/admin/users", label: "Users", Icon: People },
   { href: "/admin/tickets", label: "Tickets", Icon: SupportAgent },
   { href: "/admin/billing", label: "Billing", Icon: Payments },
 ];
 
 const secondaryLinks = [
-  { href: "/admin/settings", label: "Settings", Icon: Settings },
+  { href: "/admin/settings", label: "Organization: settings", Icon: Settings },
   { href: "/", label: "Back to Site", Icon: Home },
 ];
 
@@ -48,8 +49,13 @@ function NavLinkItem({ href, label, Icon, expanded }: NavLink & { expanded: bool
 function AdminNavLinksInner({ links, expanded }: { links: NavLink[]; expanded: boolean }) {
   const searchParams = useSearchParams();
   const orgFilter = searchParams.get("orgFilter");
+  const pathname = usePathname();
+  const eventId = /^\/admin\/events\/(\d+)(?:\/|$)/.exec(pathname)?.[1] || searchParams.get("eventId");
   return links.map(({ href, label, Icon }) => {
-    const resolvedHref = orgFilter ? `${href}?orgFilter=${encodeURIComponent(orgFilter)}` : href;
+    const params = new URLSearchParams();
+    if (orgFilter) params.set("orgFilter", orgFilter);
+    if (eventId && href.startsWith("/admin")) params.set("eventId", eventId);
+    const resolvedHref = `${href}${params.size ? `?${params}` : ""}`;
     return <NavLinkItem key={href} href={resolvedHref} label={label} Icon={Icon} expanded={expanded} />;
   });
 }
@@ -132,6 +138,7 @@ export default function AdminLayout({
       >
         <Toolbar />
         <Container maxWidth="xl" disableGutters>
+          <AdminEventSelect />
           <AdminOrgFilterSelect />
           {children}
         </Container>

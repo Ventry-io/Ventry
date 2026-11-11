@@ -227,6 +227,7 @@ model Event {
   registrationOpensAt DateTime?
   paymentDeadline     DateTime?
   schedule            Json            @default("[]")
+  pageDesign          Json            @default("{}")
   requiresHotel       Boolean         @default(false)
   requireApproval     Boolean         @default(false)
   scanOnce            Boolean         @default(false)
@@ -396,7 +397,7 @@ model RegistrationItem {
   productId      String
   priceAtBooking Float
   createdAt      DateTime     @default(now())
-  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
   registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
 
   @@index([registrationId])
@@ -494,7 +495,7 @@ model WaitlistEntry {
   registrationId String
   productId      String
   createdAt      DateTime     @default(now())
-  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
   registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
 
   @@unique([registrationId, productId])

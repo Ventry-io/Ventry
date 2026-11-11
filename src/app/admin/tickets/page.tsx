@@ -1,3 +1,4 @@
+import { withEventScope } from "@/lib/events/admin-context";
 import { redirect } from "next/navigation";
 import { Alert, Box, Typography } from "@mui/material";
 import { checkAdminAuth, adminEventFilter } from "@/lib/auth/admin";
@@ -34,7 +35,7 @@ type AdminTicketRow = Prisma.SupportTicketGetPayload<{
   include: typeof adminTicketInclude;
 }>;
 
-type Props = { searchParams: Promise<{ orgFilter?: string }> };
+type Props = { searchParams: Promise<{ orgFilter?: string; eventId?: string }> };
 
 export default function AdminTicketsPage({ searchParams }: Props) {
   return (
@@ -45,7 +46,8 @@ export default function AdminTicketsPage({ searchParams }: Props) {
 }
 
 async function AdminTicketsPageContent({ searchParams }: Props) {
-  const { orgFilter } = await searchParams;
+  const { orgFilter, eventId } = await searchParams;
+  if (!eventId) redirect("/admin/events");
   const authResult = await checkAdminAuth();
 
   if (!authResult.authorized) {
@@ -66,7 +68,7 @@ async function AdminTicketsPageContent({ searchParams }: Props) {
 
   const eventFilter = await adminEventFilter(authResult.adminId, orgFilter);
   const tickets = await prisma.supportTicket.findMany({
-    where: { event: eventFilter },
+    where: { event: withEventScope(eventFilter, eventId) },
     include: adminTicketInclude,
     orderBy: {
       updatedAt: "desc",
@@ -86,7 +88,7 @@ async function AdminTicketsPageContent({ searchParams }: Props) {
       <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
         Overview of tickets for events in your admin scope.
       </Typography>
-      <AdminTicketsOverview initialTickets={serializedTickets} />
+      <AdminTicketsOverview key={eventId} initialTickets={serializedTickets} />
     </Box>
   );
 }

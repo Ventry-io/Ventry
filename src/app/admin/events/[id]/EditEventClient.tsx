@@ -57,7 +57,7 @@ export default function EditEventClient({ event, canWrite = true }: EditEventCli
         throw new Error(errorData.error || 'Failed to update event');
       }
 
-      router.push('/admin/events');
+      router.push(`/admin?eventId=${event.id}`);
       router.refresh();
     } catch (err) {
       console.error(err);

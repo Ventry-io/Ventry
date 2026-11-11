@@ -36,6 +36,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
 import authClient from "@/lib/auth/client";
+import Turnstile, { turnstileEnabled } from "./Turnstile";
 import PasswordStrengthMeter from "./PasswordStrengthMeter";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
 import { requiredCountryCodeSchema } from "@/types/schemas/country";
@@ -176,6 +177,9 @@ export default function RegisterWizard({
   callbackUrl?: string;
 }) {
   const router = useRouter();
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaAttempt, setCaptchaAttempt] = useState(0);
+  const resetCaptcha = () => { setCaptchaToken(""); setCaptchaAttempt(value => value + 1); };
   const [step, setStep] = useState(S_ACCOUNT);
   const [path, setPath] = useState<Path | null>(null);
   const [organizerType, setOrganizerType] = useState<OrganizerType | null>(null);
@@ -319,6 +323,7 @@ export default function RegisterWizard({
 
   const submitAttendee = async () => {
     if (!accountData) return;
+    if (turnstileEnabled && !captchaToken) { setError("Complete the security check before continuing."); return; }
     setSubmitting(true);
     setError(null);
     try {
@@ -328,7 +333,7 @@ export default function RegisterWizard({
         name: payload.username,
         password: payload.password,
         callbackURL: callback,
-      });
+      }, { headers: { "x-captcha-response": captchaToken } });
       if (error) {
         setError(error.message || "Registration failed");
         return;
@@ -338,18 +343,20 @@ export default function RegisterWizard({
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setSubmitting(false);
+      resetCaptcha();
     }
   };
 
   const submitOrganizer = async (org: OrgData | null) => {
     if (!accountData || !personalData || !organizerType) return;
+    if (turnstileEnabled && !captchaToken) { setError("Complete the security check before continuing."); return; }
     setSubmitting(true);
     setError(null);
     try {
       const { confirmPassword: _, ...account } = accountData;
       const res = await fetch("/api/auth/register-organizer", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-captcha-response": captchaToken },
         body: JSON.stringify({
           email: account.email,
           username: account.username,
@@ -376,6 +383,7 @@ export default function RegisterWizard({
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setSubmitting(false);
+      resetCaptcha();
     }
   };
 
@@ -387,10 +395,11 @@ export default function RegisterWizard({
         provider,
         callbackURL: callback,
         newUserCallbackURL: `/complete-profile?callbackUrl=${encodeURIComponent(callback)}`,
-      });
+      }, { headers: { "x-captcha-response": captchaToken } });
       if (result.error) {
         setError(result.error.message || "Sign-up could not start. Please try again.");
         setSocialProvider(null);
+        resetCaptcha();
       }
     } catch {
       setError("Connection interrupted. Please try again.");
@@ -402,6 +411,7 @@ export default function RegisterWizard({
 
   return (
     <Box ref={contentRef} tabIndex={-1} aria-label={`Registration: ${steps[step]}`} sx={{ outline: "none" }}>
+      <Turnstile key={captchaAttempt} onChange={setCaptchaToken} />
       <Stepper activeStep={step} alternativeLabel sx={{ mb: 4, '& .MuiStepLabel-label': { fontSize: { xs: '0.7rem', sm: '0.875rem' }, wordBreak: 'break-word' }, '& .MuiStep-root': { px: { xs: 0.5, sm: 1 } } }}>
         {steps.map((label) => (
           <Step key={label}>
@@ -420,8 +430,8 @@ export default function RegisterWizard({
       {step === S_ACCOUNT && (
         <>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 3 }}>
-            <Button fullWidth variant="outlined" color="secondary" startIcon={<Google />} disabled={!!socialProvider} onClick={() => void signUpSocial("google")}>Continue with Google</Button>
-            <Button fullWidth variant="outlined" color="secondary" startIcon={<GitHub />} disabled={!!socialProvider} onClick={() => void signUpSocial("github")}>Continue with GitHub</Button>
+            <Button fullWidth variant="outlined" color="secondary" startIcon={<Google />} disabled={!!socialProvider || turnstileEnabled && !captchaToken} onClick={() => void signUpSocial("google")}>Continue with Google</Button>
+            <Button fullWidth variant="outlined" color="secondary" startIcon={<GitHub />} disabled={!!socialProvider || turnstileEnabled && !captchaToken} onClick={() => void signUpSocial("github")}>Continue with GitHub</Button>
           </Stack>
           {socialProvider && <Typography role="status" variant="body2" textAlign="center" sx={{ mb: 2 }}>Opening {socialProvider === "google" ? "Google" : "GitHub"}…</Typography>}
           <Divider sx={{ mb: 2 }}><Typography variant="body2" color="text.secondary">or use your email</Typography></Divider>

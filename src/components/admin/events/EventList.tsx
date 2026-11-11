@@ -69,7 +69,7 @@ export default function EventList({ initialEvents }: EventListProps) {
 
   const columns: GridColDef[] = [
     { field: 'id', headerName: 'ID', width: 70 },
-    { field: 'name', headerName: 'Event Name', flex: 1 },
+    { field: 'name', headerName: 'Event Name', flex: 1, renderCell: (params: GridRenderCellParams) => <Link href={`/admin?eventId=${params.row.id}`}>{params.row.name}</Link> },
     { 
       field: 'startDate', 
       headerName: 'Starts', 

@@ -120,7 +120,7 @@ describe("CompleteProfileWizard post-submit navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
     await waitFor(() => expect(mocks.signUp).toHaveBeenCalledWith({
       email: "jane@example.com", name: "jane-doe", password: "Cedar9!RiverMosaic27", callbackURL: "/events/42/register",
-    }));
+    }, { headers: { "x-captcha-response": "" } }));
     expect(mocks.push).toHaveBeenCalledWith("/check-email?email=jane%40example.com&callbackUrl=%2Fevents%2F42%2Fregister");
   });
 
@@ -131,7 +131,7 @@ describe("CompleteProfileWizard post-submit navigation", () => {
     await screen.findByText("Provider unavailable");
     expect(mocks.social).toHaveBeenCalledWith({
       provider: "google", callbackURL: "/events/42/register", newUserCallbackURL: "/complete-profile?callbackUrl=%2Fevents%2F42%2Fregister",
-    });
+    }, { headers: { "x-captcha-response": "" } });
     expect(screen.getByRole("button", { name: "Continue with Google" })).toBeEnabled();
   });
 

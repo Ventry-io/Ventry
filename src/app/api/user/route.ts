@@ -1,3 +1,4 @@
+import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { type NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma/prisma";
 import { getSession } from "@/lib/auth/session";
@@ -101,6 +102,9 @@ export async function GET(req: NextRequest) {
 // POST: Create a new user
 export async function POST(req: NextRequest) {
   try {
+    if (!await verifyTurnstile(req.headers)) {
+      return NextResponse.json({ error: "Security check failed or expired. Please retry." }, { status: 403 });
+    }
     if (!req.headers.get("content-type")?.includes("application/json")) {
       return NextResponse.json({ error: "Invalid content type" }, { status: 400 });
     }

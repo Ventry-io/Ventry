@@ -66,6 +66,7 @@ function buildCreateEventArgs(
             stayPolicy: validatedData.stayPolicy as Prisma.InputJsonValue,
             customFields: validatedData.customFields as Prisma.InputJsonValue,
             schedule: validatedData.schedule as Prisma.InputJsonValue,
+            pageDesign: validatedData.pageDesign as Prisma.InputJsonValue | undefined,
             ownerId: adminId,
             ...(organizationId ? { organizationId } : {}),
             location: {
@@ -75,6 +76,11 @@ function buildCreateEventArgs(
                 create: toPersistedProducts(validatedData.products)
             },
             requireApproval: validatedData.requireApproval,
+            publishAt: validatedData.publishAt,
+            registrationOpensAt: validatedData.registrationOpensAt,
+            maxRegistrations: validatedData.maxRegistrations,
+            requiresHotel: validatedData.requiresHotel,
+            paymentDeadline: validatedData.paymentDeadline,
             scanOnce: validatedData.scanOnce,
             communityEnabled: validatedData.communityEnabled ?? false,
             communityOpenAfterEnd: validatedData.communityOpenAfterEnd ?? true,

@@ -54,13 +54,13 @@ export async function uploadProfilePicture(file: File | Buffer, userId: string, 
     return data;
 }
 
-export async function uploadEventImage(file: Buffer, fileName: string, bucket: StorageBucket = "profile") {
+export async function uploadEventImage(file: Buffer, fileName: string, bucket: StorageBucket = "profile", contentType = "image/jpeg") {
     const { data, error } = await getSupabaseClient().storage
         .from(getBucketName(bucket))
         .upload(`events/${fileName}`, file, {
             cacheControl: '3600',
             upsert: false,
-            contentType: 'image/jpeg'
+            contentType
     });
 
     if(error) throw error;

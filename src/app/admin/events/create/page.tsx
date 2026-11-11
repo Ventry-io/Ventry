@@ -25,7 +25,8 @@ export default function CreateEventPage() {
         throw new Error(errorData.error || 'Failed to create event');
       }
 
-      router.push('/admin/events');
+      const created = await response.json();
+      router.push(`/admin?eventId=${created.event.id}`);
       router.refresh();
     } catch (err) {
       console.error(err);

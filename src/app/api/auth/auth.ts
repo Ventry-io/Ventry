@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { prisma } from "@/lib/prisma/prisma";
 import { toNextJsHandler } from "better-auth/next-js";
@@ -52,6 +53,11 @@ export const auth = betterAuth({
     session: {},
     hooks: {
         before: createAuthMiddleware(async (ctx) => {
+            if (["/sign-in/email", "/sign-up/email", "/sign-in/social", "/passkey/verify-authentication"].includes(ctx.path)) {
+                if (!await verifyTurnstile(ctx.headers)) {
+                    throw new APIError("FORBIDDEN", { message: "Security check failed or expired. Please retry." });
+                }
+            }
             if (ctx.path === "/unlink-account") {
                 const session = await getSessionFromCtx(ctx);
                 if (!session) return; // The endpoint's session middleware rejects unauthenticated requests.

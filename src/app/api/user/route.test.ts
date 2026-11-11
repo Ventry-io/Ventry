@@ -555,3 +555,17 @@ describe("App Router: /api/user DELETE", () => {
     expect(prismaMock.user.delete).toHaveBeenCalledWith({ where: { id: "user-1" } });
   });
 });
+
+describe("Turnstile on legacy account creation", () => {
+  it("rejects direct user creation and admin bootstrap without a token", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "secret-key");
+    try {
+      const response = await userRoute.POST(postRequest({}));
+      expect(response.status).toBe(403);
+      expect(prismaMock.user.create).not.toHaveBeenCalled();
+      const bootstrap = await import("@/app/api/admin/auth/register/route");
+      expect((await bootstrap.POST(postRequest({}))).status).toBe(403);
+    } finally { vi.unstubAllEnvs(); }
+  });
+});

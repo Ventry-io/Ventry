@@ -4,15 +4,17 @@ import RegistrationManager from "@/components/admin/registrations/RegistrationMa
 import { Suspense } from "react";
 import PageLoadingState from "@/components/common/PageLoadingState";
 
-export default function AdminUsersPage() {
+type Props = { searchParams: Promise<{ eventId?: string }> };
+
+export default function AdminUsersPage({ searchParams }: Props) {
     return (
         <Suspense fallback={<PageLoadingState />}>
-            <AdminUsersPageContent />
+            <AdminUsersPageContent searchParams={searchParams} />
         </Suspense>
     );
 }
 
-async function AdminUsersPageContent() {
+async function AdminUsersPageContent({ searchParams }: Props) {
     const authResult = await checkAdminAuth();
     
     if (!authResult.authorized) {
@@ -26,5 +28,7 @@ async function AdminUsersPageContent() {
         );
     }
 
-    return <RegistrationManager />;
+    const { eventId } = await searchParams;
+    if (!eventId) redirect("/admin/events");
+    return <RegistrationManager key={eventId} eventId={eventId} />;
 }

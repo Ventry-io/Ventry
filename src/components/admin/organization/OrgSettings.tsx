@@ -49,7 +49,7 @@ function useOrigin() {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type OrgPermission = "COMMUNITY" | "SUPPORT_TICKETS" | "EVENT_APPROVAL" | "STRIPE_FINANCES";
+type OrgPermission = "COMMUNITY" | "SUPPORT_TICKETS" | "EVENT_APPROVAL" | "STRIPE_FINANCES" | "HOTEL_MANAGEMENT";
 type InvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED";
 
 interface OrgSummary {
@@ -93,6 +93,7 @@ const PERMISSION_LABELS: Record<OrgPermission, string> = {
   SUPPORT_TICKETS: "Support Tickets",
   EVENT_APPROVAL: "Event Approval",
   STRIPE_FINANCES: "Finances",
+  HOTEL_MANAGEMENT: "Hotel & Rooms",
 };
 
 const ALL_PERMISSIONS: OrgPermission[] = [
@@ -100,6 +101,7 @@ const ALL_PERMISSIONS: OrgPermission[] = [
   "SUPPORT_TICKETS",
   "EVENT_APPROVAL",
   "STRIPE_FINANCES",
+  "HOTEL_MANAGEMENT",
 ];
 
 const STATUS_COLOR: Record<

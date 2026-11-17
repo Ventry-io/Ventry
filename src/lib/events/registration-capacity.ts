@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma/prisma";
 import { clearProductStock } from "@/lib/redis";
+import type { Prisma } from "@/generated/prisma";
+import { releaseRoomGroupForCancelledRegistration } from "@/lib/rooms/attendee";
+import { type RoomNotice, sendNotices } from "@/lib/rooms/common";
 
 const ACTIVE_REGISTRATION_STATUSES = ["PENDING", "APPROVED", "CONFIRMED"] as const;
 
@@ -13,10 +16,7 @@ type RegistrationCapacitySnapshot = {
     }>;
 };
 
-type TransactionClient = Pick<
-    typeof prisma,
-    "payment" | "product" | "registration" | "registrationItem" | "waitlistEntry"
->;
+type TransactionClient = Prisma.TransactionClient;
 
 export async function countActiveRegistrations(
     tx: TransactionClient,
@@ -81,9 +81,11 @@ export async function syncReleasedProductStocks(productIds: string[]) {
     await Promise.allSettled(uniqueProductIds.map((productId) => clearProductStock(productId)));
 }
 
+/** `roomNotices` collects roommate notifications; send them with sendNotices after the transaction commits. */
 export async function cancelRegistrationAndReleaseCapacity(
     tx: TransactionClient,
-    registrationId: string
+    registrationId: string,
+    roomNotices?: RoomNotice[]
 ) {
     const registration = await tx.registration.findUnique({
         where: {
@@ -91,6 +93,7 @@ export async function cancelRegistrationAndReleaseCapacity(
         },
         select: {
             id: true,
+            eventId: true,
             registrationItems: {
                 select: {
                     productId: true,
@@ -132,6 +135,8 @@ export async function cancelRegistrationAndReleaseCapacity(
         }
     });
 
+    roomNotices?.push(...await releaseRoomGroupForCancelledRegistration(tx, registrationId, registration.eventId));
+
     await tx.registration.update({
         where: {
             id: registrationId
@@ -147,6 +152,7 @@ export async function cancelRegistrationAndReleaseCapacity(
 
 export async function releaseExpiredPendingRegistrations(eventId: number) {
     const now = new Date();
+    const roomNotices: RoomNotice[] = [];
 
     const releasedProductIds = await prisma.$transaction(async (tx) => {
         const expiredRegistrations = await tx.registration.findMany({
@@ -185,7 +191,7 @@ export async function releaseExpiredPendingRegistrations(eventId: number) {
         const releasedIds = new Set<string>();
 
         for (const registration of expiredRegistrations) {
-            const cancelledProductIds = await cancelRegistrationAndReleaseCapacity(tx, registration.id);
+            const cancelledProductIds = await cancelRegistrationAndReleaseCapacity(tx, registration.id, roomNotices);
             for (const productId of cancelledProductIds) {
                 releasedIds.add(productId);
             }
@@ -194,7 +200,7 @@ export async function releaseExpiredPendingRegistrations(eventId: number) {
         return Array.from(releasedIds);
     });
 
-    await syncReleasedProductStocks(releasedProductIds);
+    await Promise.all([syncReleasedProductStocks(releasedProductIds), sendNotices(roomNotices)]);
 
     return releasedProductIds.length;
 }

@@ -31,7 +31,10 @@ const ProductSchema = z.object({
   price: z.coerce.number().nonnegative("Price cannot be negative"),
   type: ProductTypeSchema,
   capacity: z.coerce.number().int().positive().nullable().optional(),
-  order: z.coerce.number().int().default(0)
+  order: z.coerce.number().int().default(0),
+  /** Accommodation: beds per room. capacity counts room bookings; roommates join via invitation. */
+  minOccupants: z.coerce.number().int().min(1).max(20).optional(),
+  maxOccupants: z.coerce.number().int().min(1).max(20).optional(),
 }).passthrough();
 type Product = z.infer<typeof ProductSchema>;
 
@@ -67,6 +70,21 @@ export const checkCapacityLimits = (
       }
     });
   }
+}
+
+export const checkOccupancyLimits = (
+  data: { products?: Array<Pick<Product, "minOccupants" | "maxOccupants">> },
+  cxt: z.RefinementCtx,
+) => {
+  data.products?.forEach((p, index) => {
+    if ((p.minOccupants ?? 1) > (p.maxOccupants ?? 1)) {
+      cxt.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Minimum occupants cannot exceed maximum occupants",
+        path: ["products", index, "minOccupants"],
+      });
+    }
+  });
 }
 
 const CustomFieldType = z.enum(["text", "number", "boolean", "select"]);
@@ -135,7 +153,7 @@ export const EventBaseObject = z.object({
   schedule: z.array(ScheduleItemSchema).default([])
 });
 
-export const EventBaseSchema = EventBaseObject.superRefine(checkDateOrder).superRefine(checkCapacityLimits).strict();
+export const EventBaseSchema = EventBaseObject.superRefine(checkDateOrder).superRefine(checkCapacityLimits).superRefine(checkOccupancyLimits).strict();
 type EventBase = z.infer<typeof EventBaseSchema>;
 
 

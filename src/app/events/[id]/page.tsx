@@ -19,7 +19,8 @@ import {
   LocationOn, 
   AccessTime, 
   ConfirmationNumber,
-  Edit
+  Edit,
+  Hotel
 } from "@mui/icons-material";
 import Image from "next/image";
 import EventRegistrationStatus from "@/components/events/EventRegistrationStatus";
@@ -145,11 +146,13 @@ async function EventDetailPageContent({
       payments: {
         orderBy: { createdAt: 'desc' },
         take: 1
-      }
+      },
+      registrationItems: { select: { product: { select: { type: true } } } }
     }
   }) : null;
 
   const canOpenSupportTicket = !!registration && registration.status !== "CANCELLED";
+  const hasHotelRoom = canOpenSupportTicket && !!registration?.registrationItems.some((item) => item.product.type === "ACCOMMODATION");
 
   // Add expiresAt to the cast/serialization if needed, 
   // but Prisma already includes it in the object since we updated the schema.
@@ -499,6 +502,12 @@ async function EventDetailPageContent({
                   </Box>
                 )}
               </Paper>
+
+              {hasHotelRoom && (
+                <Button variant="outlined" href={`/events/${event.id}/room`} startIcon={<Hotel />}>
+                  Hotel room &amp; roommates
+                </Button>
+              )}
 
               {canOpenSupportTicket && registration && (
                 <SupportTicketPanel

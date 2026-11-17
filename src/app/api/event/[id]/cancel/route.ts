@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma/prisma";
 import { getSession } from "@/lib/auth/session";
 import { cancelRegistrationAndReleaseCapacity, syncReleasedProductStocks } from "@/lib/events/registration-capacity";
+import { type RoomNotice, sendNotices } from "@/lib/rooms/common";
 
 export async function POST(
     _req: NextRequest,
@@ -16,6 +17,7 @@ export async function POST(
         const eventId = Number((await params).id);
         if (Number.isNaN(eventId)) return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
+        const roomNotices: RoomNotice[] = [];
         const releasedProductIds = await prisma.$transaction(async (tx) => {
             const registration = await tx.registration.findUnique({
                 where: {
@@ -33,14 +35,14 @@ export async function POST(
                 return null;
             }
 
-            return cancelRegistrationAndReleaseCapacity(tx, registration.id);
+            return cancelRegistrationAndReleaseCapacity(tx, registration.id, roomNotices);
         });
 
         if (!releasedProductIds) {
             return NextResponse.json({ error: "Registration not found" }, { status: 404 });
         }
 
-        await syncReleasedProductStocks(releasedProductIds);
+        await Promise.all([syncReleasedProductStocks(releasedProductIds), sendNotices(roomNotices)]);
 
         return NextResponse.json({ message: "Registration cancelled" }, { status: 200 });
 

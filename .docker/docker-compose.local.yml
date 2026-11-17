@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:17
     container_name: myapp-postgres-local
-    restart: unless-stopped
+    restart: unless-stopped 
     ports:
       - "5433:5432"
     environment:

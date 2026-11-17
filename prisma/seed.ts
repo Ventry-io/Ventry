@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { hashPassword } from "../src/lib/bcrypt";
+import { seedDevelopmentData } from "./seed-dev";
 import { createPrismaClient } from "../src/lib/prisma/client";
 import fs from "fs";
 import path from "path";
@@ -106,138 +106,8 @@ async function main() {
     console.log("✅ Data restoration complete!");
 
   } else {
-    console.log("🌱 No backup found. Seeding initial development data...");
-    
-    // Create Default Admin
-    /**
-    const admin = await prisma.user.create({
-      data: {
-        email: "admin@ventry.dev",
-        name: "Ventry Admin",
-        isAdmin: true,
-        emailVerified: true,
-        adminProfile: {
-          create: {}
-        }
-      }
-    });
-
-
-    console.log(`Created admin: ${admin.email}`);
-    */
-    const types = ["ADMIN", "PRIMARY", "SECONDARY"];
-    for (const type of types) {
-      const email = process.env[`DEV_USER_${type}_EMAIL`];
-      const password = process.env[`DEV_USER_${type}_PASSWORD`];
-      if (!email || !password) {
-        console.warn(`⚠️ Missing environment variables for ${type} user. Skipping creation.`);
-        continue;
-      }
-
-      await prisma.user.create({
-        data: {
-          email,
-          name: `Dev ${type} User`,
-          isAdmin: type === "ADMIN",
-          emailVerified: true,
-          accounts: {
-            create: {
-              providerId: "credential",
-              password: await hashPassword(password),
-            }
-          }, 
-          adminProfile: type === "ADMIN" ? { create: {} } : undefined
-        }
-      });
-
-      console.log(`Created ${type} user: ${email}`);
-    }
-
-    const randomAdmin = await prisma.admin.findFirst();
-    if (!randomAdmin) {
-      console.warn("⚠️ No admin found after seeding users! Events will have no owner.");
-    } else {
-      console.log(`Found admin: ${randomAdmin.id}`);
-    }
-    const randomAdminId = randomAdmin?.id;
-
-    // Create Sample Event
-    const meetup = await prisma.event.create({
-      data: {
-        name: "Ventry Launch Meetup",
-        description: "Join us for the official launch of the Ventry Event Management platform!",
-        startDate: new Date("2026-04-15T09:00:00Z"),
-        endDate: new Date("2026-04-15T17:00:00Z"),
-        status: "DRAFT",
-        ownerId: randomAdminId,
-        location: {
-          create: {
-            name: "Ventry HQ",
-            address: "Königstrasse 1",
-            city: "Stuttgart",
-            state: "Baden-Wuerttemberg",
-            country: "Germany",
-            postalCode: "70173",
-          },
-        },
-        products: {
-          create: [
-            {
-              name: "Standard Ticket",
-              price: 49,
-              description: "Full access to all sessions",
-              type: "TICKET"
-            }
-          ]
-        }
-      },
-    });
-
-
-    // Create a published event with registration open
-    const publishedEvent = await prisma.event.create({
-      data: {
-        name: "Ventry Open Conference",
-        description: "An open conference showcasing the capabilities of Ventry.",
-        startDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 1 week from now
-        endDate: new Date(Date.now() + 8 * 24 * 60 * 60 * 1000), // 1 week + 1 day from now
-        status: "PUBLISHED",
-        requireApproval: true,
-        registrationOpensAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // Opened 2 days ago
-        ownerId: randomAdminId,
-        imageUrl: `${process.env.SUPABASE_BANNERS_BUCKET_URL}/events/TestEvent/banner0.jpg`,
-        location: {
-          create: {
-            name: "Ventry Convention Center",
-            address: "Messepiazza 1",
-            city: "Stuttgart",
-            state: "Baden-Wuerttemberg",
-            country: "Germany",
-            postalCode: "70629",
-          },
-        },
-        products: {
-          create: [
-            {
-              name: "Early Bird Ticket",
-              price: 29,
-              description: "Discounted ticket for early registrants",
-              type: "TICKET"
-            },
-            {
-              name: "Regular Ticket",
-              price: 59,
-              description: "Full access to all sessions",
-              type: "TICKET"
-            }
-          ]
-        }
-      },
-    });
-
-    console.log(`Created event: ${meetup.name}`);
-    console.log(`Created event with approval gate: ${publishedEvent.name}`);
-    console.log("Seeding completed!");
+    console.log("🌱 No backup found. Seeding development data...");
+    await seedDevelopmentData(prisma);
   }
 }
 

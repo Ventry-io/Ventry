@@ -15,6 +15,8 @@ export interface SerializedProduct {
   type?: 'TICKET' | 'ACCOMMODATION' | 'ADDON';
   capacity?: number | null;
   soldCount?: number;
+  minOccupants?: number;
+  maxOccupants?: number;
 }
 
 export type SerializedStayFeeMode = 'AUTO' | 'CUSTOM';

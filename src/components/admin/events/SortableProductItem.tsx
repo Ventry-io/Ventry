@@ -9,6 +9,8 @@ export interface SortableDraftProduct {
   description: string;
   price: number;
   capacity: number | null;
+  minOccupants?: number;
+  maxOccupants?: number;
 }
 
 interface SortableProductItemProps {
@@ -19,6 +21,8 @@ interface SortableProductItemProps {
   descriptionLabel?: string;
   capacityLabel?: string;
   removeDisabled?: boolean;
+  /** Room types: persons per physical room */
+  showOccupancy?: boolean;
   onChange: (field: keyof SortableDraftProduct, value: string | number | null) => void;
   onRemove: () => void;
 }
@@ -31,6 +35,7 @@ export function SortableProductItem({
   descriptionLabel = 'Description',
   capacityLabel = 'Capacity',
   removeDisabled = false,
+  showOccupancy = false,
   onChange,
   onRemove,
 }: SortableProductItemProps) {
@@ -106,6 +111,30 @@ export function SortableProductItem({
               </IconButton>
             </Box>
           </Grid>
+          {showOccupancy && (
+            <>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <TextField
+                  fullWidth
+                  type="number"
+                  label="Min. persons per room"
+                  slotProps={{ htmlInput: { min: 1, max: 20 } }}
+                  value={product.minOccupants ?? 1}
+                  onChange={(event) => onChange('minOccupants', event.target.value)}
+                />
+              </Grid>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <TextField
+                  fullWidth
+                  type="number"
+                  label="Max. persons per room"
+                  slotProps={{ htmlInput: { min: 1, max: 20 } }}
+                  value={product.maxOccupants ?? 1}
+                  onChange={(event) => onChange('maxOccupants', event.target.value)}
+                />
+              </Grid>
+            </>
+          )}
           <Grid size={{ xs: 12 }}>
             <TextField
               fullWidth

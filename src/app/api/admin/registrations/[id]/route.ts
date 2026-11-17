@@ -7,6 +7,7 @@ import RegistrationUpdateMail from "@/components/emails/RegistrationUpdateMail";
 import { sendMail } from "@/lib/mail";
 import { cancelRegistrationAndReleaseCapacity, syncReleasedProductStocks } from "@/lib/events/registration-capacity";
 import { createNotification } from "@/lib/notifications";
+import { type RoomNotice, sendNotices } from "@/lib/rooms/common";
 
 type FinanceAction = "NONE" | "UPCHARGE_REQUIRED" | "MANUAL_REFUND_RECOMMENDED";
 
@@ -161,6 +162,7 @@ export async function PATCH(
         }
 
         // 2. Perform update in a transaction
+        const roomNotices: RoomNotice[] = [];
         const registration = await prisma.$transaction(async (tx) => {
             // Find admin profile for current user
             const adminUserId = authResult.user?.id;
@@ -189,7 +191,7 @@ export async function PATCH(
             let releasedProductIds: string[] = [];
 
             if (isCancellingRegistration) {
-                releasedProductIds = await cancelRegistrationAndReleaseCapacity(tx, id);
+                releasedProductIds = await cancelRegistrationAndReleaseCapacity(tx, id, roomNotices);
             } else {
                 if (requestedTicketId && requestedTicketId !== currentTicketItem?.productId) {
                     const nextTicketProduct = current.event.products.find((product) => product.id === requestedTicketId);
@@ -414,7 +416,7 @@ export async function PATCH(
             };
         });
 
-        await syncReleasedProductStocks(registration.releasedProductIds);
+        await Promise.all([syncReleasedProductStocks(registration.releasedProductIds), sendNotices(roomNotices)]);
 
         // 3. Send notification email with diff
         if (changes.length > 0) {

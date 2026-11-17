@@ -14,13 +14,14 @@ import {
 } from "@mui/material";
 import { Business, CheckCircle, Cancel } from "@mui/icons-material";
 
-type OrgPermission = "COMMUNITY" | "SUPPORT_TICKETS" | "EVENT_APPROVAL" | "STRIPE_FINANCES";
+type OrgPermission = "COMMUNITY" | "SUPPORT_TICKETS" | "EVENT_APPROVAL" | "STRIPE_FINANCES" | "HOTEL_MANAGEMENT";
 
 const PERMISSION_LABELS: Record<OrgPermission, string> = {
   COMMUNITY: "Community",
   SUPPORT_TICKETS: "Support Tickets",
   EVENT_APPROVAL: "Event Approval",
   STRIPE_FINANCES: "Finances",
+  HOTEL_MANAGEMENT: "Hotel & Rooms",
 };
 
 interface InviteDetails {

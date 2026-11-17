@@ -63,7 +63,9 @@ async function EditEventPageContent({
         description: p.description,
         type: p.type as SerializedProduct['type'],
         capacity: p.capacity,
-        soldCount: p.soldCount
+        soldCount: p.soldCount,
+        minOccupants: p.minOccupants,
+        maxOccupants: p.maxOccupants
     })),
     stayPolicy: normalizeStayPolicy(
       event.stayPolicy,

@@ -112,9 +112,12 @@ describe("CompleteProfileWizard post-submit navigation", () => {
     fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: "jane@example.com" } });
     fireEvent.change(screen.getByLabelText(/^Username/), { target: { value: "jane-doe" } });
     fireEvent.change(screen.getByLabelText(/^Password/, { selector: "input" }), { target: { value: "Password1!" } });
+    // The strength estimator loads lazily, so wait for a score before asserting the gate.
+    await screen.findByText("Weak");
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/^Password/, { selector: "input" }), { target: { value: "Cedar9!RiverMosaic27" } });
     fireEvent.change(screen.getByLabelText(/^Confirm password/), { target: { value: "Cedar9!RiverMosaic27" } });
+    await screen.findByText("Strong");
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.click(await screen.findByRole("radio", { name: /Attendee/ }));
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));

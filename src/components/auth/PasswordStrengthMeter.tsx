@@ -1,9 +1,13 @@
 "use client";
 
 import type React from "react";
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { Box, Typography, LinearProgress } from '@mui/material';
-import zxcvbn from 'zxcvbn';
+import type { checkPasswordStrength } from '@/lib/auth/password-strength';
+
+type Check = typeof checkPasswordStrength;
+// Dictionaries are ~850 KB gzipped; keep them out of the page's initial JS.
+const loadCheck = () => import('@/lib/auth/password-strength').then((m) => m.checkPasswordStrength);
 
 const EMPTY_INPUTS: string[] = [];
 
@@ -18,20 +22,29 @@ export default function PasswordStrengthMeter({
   userInputs = EMPTY_INPUTS,
   setWarning
 }: PasswordStrengthMeterProps) {
-  // const [result, setResult] = useState<any>(null);
+  const [check, setCheck] = useState<Check | null>(null);
+  useEffect(() => {
+    let active = true;
+    loadCheck().then((fn) => { if (active) setCheck(() => fn); });
+    return () => { active = false; };
+  }, []);
+
   const result = useMemo(() => {
-    if(!password) return null;
-    return zxcvbn(password, userInputs);
-  }, [password, userInputs]);
+    if (!password || !check) return null;
+    return check(password, userInputs);
+  }, [password, userInputs, check]);
 
   // Update warning in useEffect to avoid state updates during render
   useEffect(() => {
-    if (result && result.score < 3) {
+    if (password && !result) {
+      // Estimator still loading: keep submit blocked without showing a message.
+      setWarning({ message: null, suggestions: [] });
+    } else if (result && result.score < 3) {
       setWarning({ message: result.feedback.warning || "Choose a longer, less predictable password.", suggestions: result.feedback.suggestions });
     } else {
       setWarning(null);
     }
-  }, [result, setWarning]);
+  }, [password, result, setWarning]);
 
 
   if (!password || !result) {
@@ -44,14 +57,7 @@ export default function PasswordStrengthMeter({
   // Progress value (0-100)
   const normalizedScore = ((result.score + 1) / 5) * 100;
   
-  // Strength text
-  const strengthText = [
-    'Very Weak',
-    'Weak',
-    'Fair',
-    'Good',
-    'Strong'
-  ][result.score] || 'Unknown';
+  const strengthText = result.strengthText;
 
   return (
     <Box sx={{ mt: 2, mb: 2 }}>

@@ -25,7 +25,8 @@ import {
   Add, 
   Visibility,
   QrCodeScanner,
-  Badge
+  Badge,
+  Hotel
 } from '@mui/icons-material';
 import Link from 'next/link';
 import type { SerializedEvent } from '@/types/event';
@@ -132,6 +133,14 @@ export default function EventList({ initialEvents }: EventListProps) {
             title="Badges"
           >
             <Badge fontSize="small" />
+          </IconButton>
+          <IconButton
+            size="small"
+            component={Link}
+            href={`/admin/events/${params.row.id}/rooms`}
+            title="Hotel rooms"
+          >
+            <Hotel fontSize="small" />
           </IconButton>
           <IconButton 
             size="small" 

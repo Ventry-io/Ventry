@@ -4,6 +4,8 @@ import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
 import Skeleton from "@mui/material/Skeleton";
 import Divider from "@mui/material/Divider";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
 import { AttachMoney, TrendingUp, Cancel, HourglassEmpty } from "@mui/icons-material";
 import StatCard from "@/components/admin/StatCard/StatCard";
 import { checkAdminAuth } from "@/lib/auth/admin";
@@ -16,6 +18,16 @@ const fmt = (amount: number) =>
 
 async function BillingContent({ adminId, orgScope }: { adminId: string; orgScope?: string }) {
     const data = await getBillingData(adminId, orgScope);
+    if (!data) {
+        return (
+            <Grid size={12}>
+                <Alert severity="info">
+                    <AlertTitle>Finance access required</AlertTitle>
+                    You don’t have access to this organization’s finances. Ask the organization owner to grant you the Finances permission.
+                </Alert>
+            </Grid>
+        );
+    }
     const paymentRows = data.recentPayments.map((p) => ({
         id: p.id,
         createdAt: p.createdAt,
@@ -30,6 +42,14 @@ async function BillingContent({ adminId, orgScope }: { adminId: string; orgScope
 
     return (
         <>
+            {data.hasRestrictedOrganizations && (
+                <Grid size={12}>
+                    <Alert severity="info">
+                        Some organization finances are hidden because you don’t have the Finances permission.
+                        Totals below include only events whose finances you can access. Ask the organization owner for access.
+                    </Alert>
+                </Grid>
+            )}
             {/* Summary cards */}
             <Grid size={12}>
                 <Typography variant="h6" fontWeight={600} color="text.secondary">Overview</Typography>

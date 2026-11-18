@@ -28,7 +28,7 @@ import {
   Person,
 } from "@mui/icons-material";
 import { alpha } from "@mui/material/styles";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import authClient from "@/lib/auth/client";
@@ -36,17 +36,19 @@ import { requiredCountryCodeSchema } from "@/types/schemas/country";
 import CountryAutocomplete from "@/components/common/CountryAutocomplete";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
 import { notifyProfilePictureChanged } from "@/lib/user/profilePictureEvents";
+import { getCallbackPath } from "@/lib/auth/callback";
+import { usernameSchema } from "@/types/schemas/signup";
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
 const personalSchema = z.object({
-  legalName: z.string().trim().min(2, "Required"),
-  addressLine1: z.string().trim().min(2, "Required"),
-  addressLine2: z.string().trim().optional(),
-  addressCity: z.string().trim().min(2, "Required"),
-  addressState: z.string().trim().optional(),
-  addressPostalCode: z.string().trim().min(2, "Required"),
-  addressCountry: requiredCountryCodeSchema,
+  legalName: z.string().trim().min(2, "Required").max(200),
+  addressLine1: z.string().trim().max(200).optional(),
+  addressLine2: z.string().trim().max(200).optional(),
+  addressCity: z.string().trim().max(120).optional(),
+  addressState: z.string().trim().max(120).optional(),
+  addressPostalCode: z.string().trim().max(40).optional(),
+  addressCountry: z.string().optional(),
 });
 
 const orgSchema = z.object({
@@ -93,15 +95,12 @@ function SelectionCard({
   return (
     <Paper
       variant="outlined"
-      role="button"
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") onSelect();
-      }}
+      component="label"
       sx={{
         p: 3,
         cursor: "pointer",
+        display: "block",
+        position: "relative",
         borderWidth: selected ? 2 : 1,
         borderColor: selected ? "primary.main" : "divider",
         bgcolor: selected
@@ -112,7 +111,7 @@ function SelectionCard({
           borderColor: "primary.light",
           bgcolor: (t) => alpha(t.palette.primary.main, 0.03),
         },
-        "&:focus-visible": {
+        "&:focus-within": {
           outline: "2px solid",
           outlineColor: "primary.main",
           outlineOffset: 2,
@@ -121,6 +120,8 @@ function SelectionCard({
         minHeight: 160,
       }}
     >
+      <Box component="input" type="radio" name="account-type" checked={selected} onChange={onSelect}
+        sx={{ position: "absolute", opacity: 0, width: 1, height: 1 }} />
       <Stack alignItems="center" spacing={1.5} textAlign="center">
         <Box sx={{ color: selected ? "primary.main" : "text.secondary", display: "flex" }}>
           {icon}
@@ -146,33 +147,52 @@ export default function CompleteProfileWizard({
   defaultLegalName,
   defaultUsername,
   avatarUrl,
+  checkInOnly = false,
+  billingOnly = false,
+  organizerOnly = false,
+  defaultPersonal,
 }: {
   callbackUrl?: string;
   defaultLegalName?: string;
   defaultUsername?: string;
   avatarUrl?: string;
+  checkInOnly?: boolean;
+  billingOnly?: boolean;
+  organizerOnly?: boolean;
+  defaultPersonal?: Partial<PersonalData>;
 }) {
-  const [step, setStep] = useState(S_USERNAME);
+  const [step, setStep] = useState(checkInOnly || billingOnly || organizerOnly ? S_PERSONAL : S_USERNAME);
   const [username, setUsername] = useState(defaultUsername || "");
   const [importProfilePicture, setImportProfilePicture] = useState(true);
-  const [path, setPath] = useState<Path | null>(null);
+  const [path, setPath] = useState<Path | null>(checkInOnly || billingOnly ? "ATTENDEE" : organizerOnly ? "ORGANIZER" : null);
   const [organizerType, setOrganizerType] = useState<OrganizerType | null>(null);
   const [personalData, setPersonalData] = useState<PersonalData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    contentRef.current?.focus();
+  }, [step]);
 
   const personalForm = useForm<PersonalData>({
-    resolver: zodResolver(personalSchema),
+    resolver: zodResolver(personalSchema.superRefine((data, ctx) => {
+      if (path !== "ORGANIZER" && !billingOnly) return;
+      for (const field of ["addressLine1", "addressCity", "addressPostalCode"] as const) {
+        if ((data[field]?.length ?? 0) < 2) ctx.addIssue({ code: "custom", path: [field], message: "Required" });
+      }
+      if (!requiredCountryCodeSchema.safeParse(data.addressCountry).success) ctx.addIssue({ code: "custom", path: ["addressCountry"], message: "Select a country" });
+    })),
     mode: "onBlur",
-    defaultValues: { legalName: defaultLegalName || "" },
+    defaultValues: { ...(checkInOnly ? {} : defaultPersonal), legalName: defaultPersonal?.legalName || defaultLegalName || "" },
   });
   const orgForm = useForm<OrgData>({
     resolver: zodResolver(orgSchema),
     mode: "onBlur",
   });
 
-  const orgNameValue = orgForm.watch("orgName") || "";
-  const slugManuallyEdited = useRef(false);
+  const orgNameValue = useWatch({ control: orgForm.control, name: "orgName", defaultValue: "" });
+  const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
 
   const generateSlug = useCallback(
     (name: string) =>
@@ -184,42 +204,51 @@ export default function CompleteProfileWizard({
   );
 
   useEffect(() => {
-    if (!slugManuallyEdited.current && orgNameValue) {
+    if (!slugManuallyEdited && orgNameValue) {
       orgForm.setValue("orgSlug", generateSlug(orgNameValue), {
         shouldValidate: step === S_ORG_DETAILS,
       });
     }
-  }, [orgNameValue, orgForm, generateSlug, step]);
+  }, [orgNameValue, orgForm, generateSlug, step, slugManuallyEdited]);
 
-  const steps = [
+  const steps = billingOnly ? ["Booking details"] : checkInOnly ? ["Check-in details"] : [
+    ...(!organizerOnly ? [
     "Username",
     "Your path",
-    "Personal details",
-    ...(path === "ORGANIZER" ? ["Organizer type"] : []),
+    ] : []),
+    ...(path === "ORGANIZER" ? ["Billing details", "Organizer type"] : []),
     ...(path === "ORGANIZER" && organizerType === "ORGANIZATION" ? ["Organization"] : []),
   ];
+  const activeStep = checkInOnly || billingOnly ? 0 : organizerOnly ? step - S_PERSONAL : step;
 
   const go = (n: number) => {
     setError(null);
     setStep(n);
   };
 
-  const onUsernameNext = () => {
-    const trimmed = username.trim();
-    if (trimmed.length < 2) {
-      setError("Username must be at least 2 characters.");
+  const onUsernameNext = async () => {
+    const parsed = usernameSchema.safeParse(username);
+    if (!parsed.success) {
+      setError(parsed.error.issues[0].message);
       return;
     }
-    if (trimmed.length > DISPLAY_NAME_MAX_LENGTH) {
-      setError(`Username must be ${DISPLAY_NAME_MAX_LENGTH} characters or fewer.`);
-      return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      if (parsed.data !== defaultUsername) {
+        const response = await fetch(`/api/user/username?username=${encodeURIComponent(parsed.data)}`);
+        if (response.ok && (await response.json()).available === false) {
+          setError("This username is taken. Choose another.");
+          return;
+        }
+      }
+      setUsername(parsed.data);
+      go(S_PATH);
+    } catch {
+      setError("We could not check your username. Check your connection and try again.");
+    } finally {
+      setSubmitting(false);
     }
-    if (/\s/.test(trimmed)) {
-      setError("Username cannot contain spaces - use hyphens or underscores instead.");
-      return;
-    }
-    setUsername(trimmed);
-    go(S_PATH);
   };
 
   const onPathNext = () => {
@@ -227,7 +256,8 @@ export default function CompleteProfileWizard({
       setError("Please choose a path to continue.");
       return;
     }
-    go(S_PERSONAL);
+    if (path === "ATTENDEE") void submit(null, null, null);
+    else go(S_PERSONAL);
   };
 
   const onPersonalNext = personalForm.handleSubmit((data) => {
@@ -260,7 +290,7 @@ export default function CompleteProfileWizard({
     resolvedOrganizerType: OrganizerType | null,
     org: OrgData | null,
   ) => {
-    if (!personal || !path) return;
+    if (!path) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -269,8 +299,7 @@ export default function CompleteProfileWizard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...personal,
-          username,
-          importProfilePicture,
+          ...(checkInOnly || billingOnly || organizerOnly ? {} : { username, importProfilePicture }),
           path,
           organizerType: resolvedOrganizerType ?? undefined,
           ...(org
@@ -302,7 +331,7 @@ export default function CompleteProfileWizard({
       // redirect() inside a Suspense boundary and soft navigation under this
       // app's cacheComponents config. A full navigation always re-reads the
       // now-committed session server-side, so it can't hit that race.
-      window.location.href = callbackUrl || "/";
+      window.location.href = getCallbackPath(callbackUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
@@ -311,8 +340,8 @@ export default function CompleteProfileWizard({
   };
 
   return (
-    <Box>
-      <Stepper activeStep={step} alternativeLabel sx={{ mb: 4 }}>
+    <Box ref={contentRef} tabIndex={-1} aria-label={`Account setup: ${steps[activeStep]}`} sx={{ outline: "none" }}>
+      <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 4, '& .MuiStepLabel-label': { fontSize: { xs: '0.7rem', sm: '0.875rem' }, wordBreak: 'break-word' }, '& .MuiStep-root': { px: { xs: 0.5, sm: 1 } } }}>
         {steps.map((label) => (
           <Step key={label}>
             <StepLabel>{label}</StepLabel>
@@ -373,12 +402,13 @@ export default function CompleteProfileWizard({
           <Stack direction="row" justifyContent="flex-end" sx={{ mt: 3 }}>
             <Button
               onClick={onUsernameNext}
+              disabled={submitting}
               variant="contained"
               size="large"
               endIcon={<ArrowForward />}
               sx={{ py: 1.25 }}
             >
-              Continue
+              {submitting ? "Checking…" : "Continue"}
             </Button>
           </Stack>
         </Box>
@@ -394,7 +424,7 @@ export default function CompleteProfileWizard({
             You can always change this later.
           </Typography>
 
-          <Grid container spacing={2}>
+          <Grid container spacing={2} role="radiogroup" aria-label="How will you use Ventry?">
             <Grid size={{ xs: 12, sm: 6 }}>
               <SelectionCard
                 selected={path === "ATTENDEE"}
@@ -417,17 +447,18 @@ export default function CompleteProfileWizard({
           </Grid>
 
           <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
-            <Button onClick={() => go(S_USERNAME)} startIcon={<ArrowBack />} variant="text">
+            <Button onClick={() => go(S_USERNAME)} startIcon={<ArrowBack />} variant="text" disabled={submitting}>
               Back
             </Button>
             <Button
               onClick={onPathNext}
+              disabled={submitting}
               variant="contained"
               size="large"
               endIcon={<ArrowForward />}
               sx={{ py: 1.25 }}
             >
-              Continue
+              {submitting ? "Finishing up…" : path === "ATTENDEE" ? "Finish" : "Continue"}
             </Button>
           </Stack>
         </Box>
@@ -437,8 +468,10 @@ export default function CompleteProfileWizard({
       {step === S_PERSONAL && (
         <Box component="form" onSubmit={(e) => void onPersonalNext(e)} noValidate>
           <Alert severity="info" sx={{ mb: 2 }}>
-            {path === "ATTENDEE"
-              ? "Your legal name and address are protected personal data. They are not shown publicly; check-in staff may see your legal name when verifying ID at the door."
+            {billingOnly
+              ? "Add your legal name and billing address before booking a ticket. Save them now to avoid delays when ticket sales open. These details are private. No ticket is reserved during this step."
+              : path === "ATTENDEE"
+              ? "Add the name shown on your ID so event staff can verify your ticket at check-in. It is not shown on your public profile. No address is needed."
               : "Your legal details are used for billing and compliance purposes and are not shown publicly."}
           </Alert>
 
@@ -453,6 +486,7 @@ export default function CompleteProfileWizard({
             helperText={personalForm.formState.errors.legalName?.message || " "}
           />
 
+          {(path === "ORGANIZER" || billingOnly) && <>
           <TextField
             margin="normal"
             required
@@ -528,11 +562,10 @@ export default function CompleteProfileWizard({
               />
             </Grid>
           </Grid>
+          </>}
 
           <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
-            <Button onClick={() => go(S_PATH)} startIcon={<ArrowBack />} variant="text" disabled={submitting}>
-              Back
-            </Button>
+            {checkInOnly || billingOnly || organizerOnly ? <Button href={organizerOnly ? "/profile" : getCallbackPath(callbackUrl).replace(/\/register(?:\?.*)?$/, "") || "/"}>Not now</Button> : <Button onClick={() => go(S_PATH)} startIcon={<ArrowBack />} variant="text" disabled={submitting}>Back</Button>}
             <Button
               type="submit"
               variant="contained"
@@ -568,7 +601,7 @@ export default function CompleteProfileWizard({
             you build a team with scoped permissions.
           </Typography>
 
-          <Grid container spacing={2}>
+          <Grid container spacing={2} role="radiogroup" aria-label="Organizer type">
             <Grid size={{ xs: 12, sm: 6 }}>
               <SelectionCard
                 selected={organizerType === "INDIVIDUAL"}
@@ -645,7 +678,7 @@ export default function CompleteProfileWizard({
             placeholder="my-organization"
             {...orgForm.register("orgSlug", {
               onChange: () => {
-                slugManuallyEdited.current = true;
+                setSlugManuallyEdited(true);
               },
             })}
             error={!!orgForm.formState.errors.orgSlug}

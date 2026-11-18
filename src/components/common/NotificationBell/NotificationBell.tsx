@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNotificationStream } from "./useNotificationStream";
 import Badge from "@mui/material/Badge";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -37,6 +38,7 @@ const TABS: { label: string; value: NotificationType | "ALL" }[] = [
   { label: "System", value: "SYSTEM" },
 ];
 
+// Fallback only: new notifications arrive live through useNotificationStream.
 const POLL_INTERVAL_MS = 60_000;
 
 export default function NotificationBell() {
@@ -75,6 +77,10 @@ export default function NotificationBell() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [fetchNotifications]);
+
+  useNotificationStream(() => {
+    void fetchNotifications();
+  });
 
   const markRead = async (id: string) => {
     await fetch(`/api/notifications/${id}/read`, { method: "PATCH" });

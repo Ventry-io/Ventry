@@ -38,7 +38,7 @@ function postRequest(body: unknown) {
 
 const VALID_INDIVIDUAL = {
   email: "organizer@example.com",
-  username: "Organizer Name",
+  username: "Organizer-Name",
   password: "Str0ngPassword!",
   legalName: "Organizer Legal Name",
   addressLine1: "123 Main St",
@@ -68,6 +68,16 @@ describe("App Router: /api/auth/register-organizer POST", () => {
         adminOrganization: { create: vi.fn() },
       }),
     );
+  });
+
+  it("keeps a created account usable when organizer setup needs to be retried", async () => {
+    prismaMock.$transaction.mockRejectedValueOnce(new Error("Connection interrupted"));
+    const response = await registerOrganizerRoute.POST(postRequest({ ...VALID_INDIVIDUAL, callbackURL: "/events/42" }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ success: true, organizerSetupPending: true });
+    expect(authMock.api.signUpEmail).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({ callbackURL: "/complete-profile?intent=organizer&callbackUrl=%2Fevents%2F42" }),
+    }));
   });
 
   it("rejects invalid JSON", async () => {

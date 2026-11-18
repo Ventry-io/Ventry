@@ -26,6 +26,7 @@ export const enhancedUserSchema = z.object({
   })).optional(),
   // Privacy settings
   showAge: z.boolean().optional(),
+  showConventions: z.boolean().optional(),
 });
 
 export const profileUpdateSchema = enhancedUserSchema.partial();

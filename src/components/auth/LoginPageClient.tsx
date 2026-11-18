@@ -9,6 +9,7 @@ import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
+import { getCallbackPath } from "@/lib/auth/callback";
 import TextField from "@mui/material/TextField";
 import CircularProgress from "@mui/material/CircularProgress";
 import LastUsedIndicator from "./LastUsedIndicator";
@@ -75,7 +76,7 @@ export default function LoginPageClient() {
   const searchParams = useSearchParams();
   const [mounted, setMounted] = React.useState(false);
 
-  const callbackUrl = searchParams.get("callbackUrl") || "/";
+  const callbackUrl = getCallbackPath(searchParams.get("callbackUrl"));
   const error = searchParams.get("error");
   const provider = searchParams.get("provider");
   const message = searchParams.get("message");
@@ -93,6 +94,7 @@ export default function LoginPageClient() {
   const [linkingError, setLinkingError] = React.useState("");
 
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Preserve browser query status before cleaning history after hydration.
     setMounted(true);
 
     // Read from window.location.search — useSearchParams() can return empty
@@ -193,6 +195,10 @@ export default function LoginPageClient() {
             <Typography variant="body2">{resolvedStatus.body}</Typography>
           </Alert>
         </Box>
+      )}
+
+      {resolvedStatus === STATUS_MESSAGES.registered && (
+        <Button href={`/check-email?callbackUrl=${encodeURIComponent(callbackUrl)}`} sx={{ mb: 2 }}>Open email confirmation</Button>
       )}
 
       {accountExists && provider && (

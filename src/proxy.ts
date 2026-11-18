@@ -13,10 +13,10 @@ const routes: Array<{ pattern: URLPattern, mw: SubMW }> = [
 export async function proxy(req: NextRequest) {
     const res = NextResponse.next();
     const pathname = req.nextUrl.pathname;
+    // Process liveness only; keep it free of middleware work and log noise.
+    if (pathname === "/api/health/live") return res;
 
-    // Block navigation anywhere until the profile-completion step is done
-    // (covers SSO signups that skip RegisterWizard, and any pre-existing
-    // incomplete account).
+    // Require private booking details before entering event registration.
     const profileCheck = await mws.profileCompletion.middleware(req);
     if (profileCheck && profileCheck.status !== 200) return profileCheck;
 
@@ -55,7 +55,7 @@ export const config = {
         // Match all API routes (we filter out auth and user routes in the middleware function)
         "/api/:path*",
         // Match all page routes (excluding static assets and files) so the
-        // profile-completion gate runs on every navigation.
+        // booking details gate can preserve the intended registration URL.
         "/((?!api|_next/static|_next/image|.*\\..*).*)",
     ]
 }

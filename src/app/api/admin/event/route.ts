@@ -47,6 +47,8 @@ function toPersistedProducts(products: CreateEventData["products"]) {
         price: product.price,
         type: product.type as "TICKET" | "ACCOMMODATION" | "ADDON",
         capacity: product.capacity,
+        minOccupants: product.minOccupants,
+        maxOccupants: product.maxOccupants,
     }));
 }
 

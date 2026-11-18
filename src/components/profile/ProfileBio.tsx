@@ -13,10 +13,11 @@ interface ProfileBioProps {
 
 export default function ProfileBio({ bio }: ProfileBioProps) {
   return (
-    <Card variant="outlined">
+    <Card variant="outlined" sx={{ borderRadius: 3 }}>
       <CardContent>
         <Typography 
-          variant="h6" 
+          variant="h6"
+          component="h2"
           gutterBottom 
           sx={{ 
             display: 'flex', 
@@ -32,7 +33,8 @@ export default function ProfileBio({ bio }: ProfileBioProps) {
           variant="body1" 
           sx={{ 
             lineHeight: 1.7,
-            whiteSpace: 'pre-wrap'
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'anywhere'
           }}
         >
           {bio}

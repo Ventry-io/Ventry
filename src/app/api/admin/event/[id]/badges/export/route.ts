@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { checkEventAdminAuth } from "@/lib/auth/event-admin";
-import { loadBadgeAttendeesByIds, renderBadgePng, renderPrintableBadgesHtml } from "@/lib/badges/server";
+import { BadgeImageError, loadBadgeAttendeesByIds, renderBadgePng, renderPrintableBadgesHtml } from "@/lib/badges/server";
 import { badgeExportSchema } from "@/types/schemas/badge";
 import { z } from "zod";
 
@@ -24,6 +24,9 @@ export async function POST(
     }
 
     if (data.format === "png") {
+      if (data.additionalTemplates?.length) {
+        return NextResponse.json({ error: "PNG export supports one design at a time; use the print view for multiple badges" }, { status: 422 });
+      }
       if (attendees.length !== 1) {
         return NextResponse.json({ error: "PNG export supports one attendee at a time" }, { status: 422 });
       }
@@ -39,7 +42,7 @@ export async function POST(
       });
     }
 
-    const html = renderPrintableBadgesHtml(data.template, attendees, eventId, data.pageMode);
+    const html = renderPrintableBadgesHtml(data.template, attendees, eventId, data.pageMode, data.additionalTemplates);
     return new NextResponse(html, {
       status: 200,
       headers: {
@@ -48,6 +51,9 @@ export async function POST(
       },
     });
   } catch (error) {
+    if (error instanceof BadgeImageError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues }, { status: 422 });
     }

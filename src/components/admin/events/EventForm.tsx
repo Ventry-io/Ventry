@@ -77,6 +77,8 @@ type ProductDraft = {
   description: string;
   price: number;
   capacity: number | null;
+  minOccupants: number;
+  maxOccupants: number;
 };
 
 type EventFormProduct = EventProduct & { id: string };
@@ -102,6 +104,8 @@ function createProductDraft(prefix: string): ProductDraft {
     description: "",
     price: 0,
     capacity: null,
+    minOccupants: 1,
+    maxOccupants: 1,
   };
 }
 
@@ -112,6 +116,8 @@ function toProductDraft(product: EventFormProduct): ProductDraft {
     description: product.description || "",
     price: Number(product.price || 0),
     capacity: product.capacity ?? null,
+    minOccupants: Number(product.minOccupants ?? 1),
+    maxOccupants: Number(product.maxOccupants ?? 1),
   };
 }
 
@@ -546,6 +552,13 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
           };
         }
 
+        if (field === "minOccupants" || field === "maxOccupants") {
+          return {
+            ...roomType,
+            [field]: Math.max(1, Number(value || 1)),
+          };
+        }
+
         return {
           ...roomType,
           [field]: value,
@@ -613,6 +626,8 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
         price: roomType.price,
         type: "ACCOMMODATION" as const,
         capacity: roomType.capacity,
+        minOccupants: roomType.minOccupants,
+        maxOccupants: roomType.maxOccupants,
         order: orderCursor++,
       })),
     );
@@ -1458,6 +1473,8 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                                     product={roomType}
                                     nameLabel="Room Type"
                                     priceLabel="Cost"
+                                    capacityLabel="Rooms available"
+                                    showOccupancy
                                     onChange={(field, value) => updateHotelRoomType(hotelIndex, roomIndex, field, value)}
                                     onRemove={() => removeHotelRoomType(hotelIndex, roomIndex)}
                                   />

@@ -31,6 +31,8 @@ RUN npx prisma generate && npm run build:docker
 
 FROM base AS runner
 WORKDIR /app
+# pg_isready for the PostgreSQL availability check in /api/health.
+RUN apk add --no-cache postgresql-client
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -60,4 +62,10 @@ ENV PORT=3000
 # server.js is created by next build from the standalone output
 # https://nextjs.org/docs/pages/api-reference/config/next-config-js/output
 ENV HOSTNAME="0.0.0.0"
+
+# Aggregated health: any failing, unknown or stale dependency marks the container unhealthy.
+# Checks are cached per dependency, so this 30s poll runs SELECT 1 at most hourly. Dependency checks time out after 10s.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=20s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/api/health', { signal: AbortSignal.timeout(12000) }).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
 CMD ["node", "server.js"]

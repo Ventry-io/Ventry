@@ -21,6 +21,7 @@ const userSchema = z.object({
   dateOfBirth: optionalBirthDateSchema,
   pronouns: z.string().max(50).optional(),
   showAge: z.boolean().optional(),
+  showConventions: z.boolean().optional(),
   showExactBirthdate: z.boolean().optional(),
   socialLinks: z.object({
     telegram: z.string().max(100).optional(),

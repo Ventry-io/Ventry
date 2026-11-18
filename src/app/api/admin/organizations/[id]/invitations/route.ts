@@ -7,15 +7,17 @@ import { renderComponentToHTML } from "@/lib/helpers/html";
 import { sendMail } from "@/lib/mail";
 import { createNotification } from "@/lib/notifications";
 import OrgInvitationMail from "@/components/emails/OrgInvitationMail";
+import { crewAssignmentSchema } from "@/types/schemas/crew";
 
 function getAppBaseUrl() {
   return process.env.BETTER_AUTH_URL || process.env.NEXTAUTH_URL || "https://local.dev:3443";
 }
 
 const createInvitationSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().email(),
+  ...crewAssignmentSchema.shape,
   permissions: z.array(z.nativeEnum(AdminOrgPermission)).default([]),
-});
+}).strict();
 
 export async function GET(
   req: NextRequest,
@@ -44,6 +46,10 @@ export async function GET(
       token: true,
       invitedEmail: true,
       permissions: true,
+      accessLevel: true,
+      departmentId: true,
+      role: true,
+      department: { select: { name: true } },
       status: true,
       expiresAt: true,
       createdAt: true,
@@ -104,6 +110,7 @@ export async function POST(
       organizationId: orgId,
       invitedEmail: body.email,
       status: AdminInvitationStatus.PENDING,
+      expiresAt: { gt: new Date() },
     },
   });
   if (existingInvite) {
@@ -122,6 +129,10 @@ export async function POST(
     );
   }
 
+  if (body.departmentId && !await prisma.crewDepartment.findFirst({ where: { id: body.departmentId, organizationId: orgId } })) {
+    return NextResponse.json({ error: "Department does not belong to this organization" }, { status: 400 });
+  }
+
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
   const invitation = await prisma.adminInvitation.create({
@@ -131,6 +142,9 @@ export async function POST(
       invitedAdminId: invitedUser.adminProfile.id,
       invitedByAdminId: auth.adminId,
       permissions: body.permissions,
+      accessLevel: body.accessLevel,
+      departmentId: body.departmentId,
+      role: body.role,
       expiresAt,
     },
   });
@@ -143,6 +157,7 @@ export async function POST(
     day: "numeric",
   });
 
+  let emailSent = false;
   try {
     const html = await renderComponentToHTML(OrgInvitationMail, {
       orgName: org.name,
@@ -152,6 +167,7 @@ export async function POST(
       expiresAt: expiresAtFormatted,
     });
     await sendMail(body.email, `You've been invited to join ${org.name} on Ventry`, html);
+    emailSent = true;
   } catch (err) {
     console.error("Failed to send invitation email:", err);
   }
@@ -168,5 +184,5 @@ export async function POST(
     console.error("Failed to send invitation notification:", err);
   }
 
-  return NextResponse.json({ invitation }, { status: 201 });
+  return NextResponse.json({ invitation, emailSent }, { status: 201 });
 }

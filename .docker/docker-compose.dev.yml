@@ -13,8 +13,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:5001:3000"
+    networks:
+      ventry-internal:
+      caddy-public:
+        aliases:
+          - ventry
 
   redis:
     image: redis:7-alpine
@@ -28,6 +31,17 @@ services:
       retries: 5
     volumes:
       - ventry-redis-dev-data:/data
+    networks:
+      - ventry-internal
 
 volumes:
   ventry-redis-dev-data:
+
+networks:
+  caddy-public:
+    external: true
+    name: caddy-public
+
+  ventry-internal:
+    driver: bridge
+    internal: true

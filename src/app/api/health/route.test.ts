@@ -6,6 +6,8 @@ const giphySearch = vi.hoisted(() => vi.fn());
 
 const checks = vi.hoisted(() => ({
   prisma: vi.fn(),
+  postgres: vi.fn(),
+  redis: vi.fn(),
   stripe: vi.fn(),
   giphy: vi.fn(),
   supabase: vi.fn(),
@@ -13,6 +15,8 @@ const checks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/prisma/prisma", () => ({ prisma: { $queryRaw: checks.prisma } }));
+vi.mock("@/lib/pg-isready", () => ({ checkPostgresReady: checks.postgres }));
+vi.mock("@/lib/redis", () => ({ pingRedis: checks.redis }));
 vi.mock("@/lib/stripe", () => ({ stripe: { accounts: { retrieve: checks.stripe } } }));
 vi.mock("@/lib/mail", () => ({ mailTransport: { verify: checks.mail } }));
 vi.mock("@/lib/auth/session", () => ({ getSession }));
@@ -37,8 +41,11 @@ describe("GET /api/health", () => {
     vi.resetModules();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance", "Date"] });
     vi.stubEnv("GIPHY_API_KEY", "test-key");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_key");
+    vi.stubEnv("SUPABASE_URL", "https://supabase.test");
+    vi.stubEnv("SMTP_HOST", "smtp.test");
     vi.stubEnv("GIPHY_CACHE_TTL_MS", "300000");
-    vi.stubGlobal("ventryGiphyHealth", undefined);
+    vi.stubGlobal("ventryHealthSignals", undefined);
     vi.stubEnv("CACHE_TTL_MS", "60000");
     vi.stubEnv("SUPABASE_BUCKET_ID", "profile-test");
     vi.stubEnv("SUPABASE_BANNERS_BUCKET_ID", "");
@@ -78,12 +85,17 @@ describe("GET /api/health", () => {
     expect(body.cacheTtlMs).toBe(60_000);
     expect(Number.isNaN(Date.parse(body.timestamp))).toBe(false);
     expect(body.durationMs).toBe(70);
+    const healthy = (durationMs: number, required = false) => ({
+      success: true, status: "healthy", required, durationMs, checkedAt: expect.any(String),
+    });
     expect(body.fuses).toEqual({
-      prisma: { success: true, durationMs: 30 },
-      stripe: { success: true, durationMs: 70 },
-      giphy: { success: true, durationMs: 0 },
-      supabase: { success: true, durationMs: 0 },
-      mail: { success: true, durationMs: 0 },
+      prisma: healthy(30, true),
+      postgres: healthy(0, true),
+      redis: healthy(0, true),
+      stripe: healthy(70),
+      giphy: healthy(0),
+      supabase: healthy(0),
+      mail: healthy(0),
     });
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -95,12 +107,15 @@ describe("GET /api/health", () => {
     const body = await response.json();
 
     expect(response.status).toBe(500);
-    expect(body.status).toBe("error");
+    // Required dependencies make the app unusable; the rest degrade single features.
+    const required = ["prisma", "postgres", "redis"].includes(name);
+    expect(body.status).toBe(required ? "error" : "degraded");
     expect(body.fuses[name]).toEqual({
-      success: false, durationMs: 0, error: `Health check ${name} failed`, code: "ECONNREFUSED",
+      success: false, status: "unavailable", required, durationMs: 0, checkedAt: expect.any(String),
+      error: `Health check ${name} failed`, code: "ECONNREFUSED",
     });
     for (const other of Object.keys(checks).filter((key) => key !== name)) {
-      expect(body.fuses[other]).toEqual({ success: true, durationMs: 0 });
+      expect(body.fuses[other]).toMatchObject({ success: true, status: "healthy", durationMs: 0 });
     }
     expect(JSON.stringify(body)).not.toContain("Sensitive provider details");
     expect(vi.getTimerCount()).toBe(0);
@@ -141,7 +156,8 @@ describe("GET /api/health", () => {
     checks.mail.mockImplementation(() => { throw { message: "smtp://user:secret@host", code: "smtp://secret" }; });
     const response = await GET();
     expect((await response.json()).fuses.mail).toEqual({
-      success: false, durationMs: 0, error: "Health check mail failed",
+      success: false, status: "unavailable", required: false, durationMs: 0, checkedAt: expect.any(String),
+      error: "Health check mail failed",
     });
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -153,12 +169,19 @@ describe("GET /api/health", () => {
     expect((await response.json()).fuses.mail.success).toBe(false);
   });
 
-  it("reports a missing Giphy API key without making a Giphy request", async () => {
-    vi.stubEnv("GIPHY_API_KEY", "");
+  it.each([
+    ["stripe", "STRIPE_SECRET_KEY"],
+    ["giphy", "GIPHY_API_KEY"],
+    ["supabase", "SUPABASE_URL"],
+    ["mail", "SMTP_HOST"],
+  ] as const)("reports unconfigured optional %s as disabled without checking it", async (name, envVar) => {
+    vi.stubEnv(envVar, "");
     const response = await GET();
-    expect(response.status).toBe(500);
-    expect((await response.json()).fuses.giphy).toMatchObject({ success: false, code: "MISSING_API_KEY" });
-    expect(checks.giphy).not.toHaveBeenCalled();
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.fuses[name]).toEqual({ success: false, status: "disabled", required: false, durationMs: 0, code: "NOT_CONFIGURED" });
+    expect(checks[name]).not.toHaveBeenCalled();
   });
 
   it("returns completed results when a dependency exceeds the deadline", async () => {
@@ -170,7 +193,7 @@ describe("GET /api/health", () => {
     expect(response.status).toBe(500);
     expect(body.durationMs).toBe(10_000);
     expect(body.fuses.stripe).toMatchObject({ success: false, durationMs: 10_000, code: "HEALTH_CHECK_TIMEOUT" });
-    expect(body.fuses.prisma).toEqual({ success: true, durationMs: 0 });
+    expect(body.fuses.prisma).toMatchObject({ success: true, durationMs: 0 });
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -182,7 +205,7 @@ describe("GET /api/health", () => {
     await vi.advanceTimersByTimeAsync(59_999);
     const cached = await GET();
     expect(cached.status).toBe(200);
-    expect(await cached.json()).toEqual(original);
+    expect((await cached.json()).fuses).toEqual(original.fuses);
     expect(checks.mail).toHaveBeenCalledOnce();
 
     await vi.advanceTimersByTimeAsync(1);
@@ -200,12 +223,12 @@ describe("GET /api/health", () => {
     expect(original.cacheTtlMs).toBe(3_000);
 
     await vi.advanceTimersByTimeAsync(2_999);
-    expect(await (await GET()).json()).toEqual(original);
+    expect((await (await GET()).json()).fuses.mail).toEqual(original.fuses.mail);
     expect(checks.mail).toHaveBeenCalledOnce();
 
     await vi.advanceTimersByTimeAsync(1);
     const refreshed = await (await GET()).json();
-    expect(refreshed.timestamp).not.toBe(original.timestamp);
+    expect(refreshed.fuses.mail.checkedAt).not.toBe(original.fuses.mail.checkedAt);
     expect(checks.mail).toHaveBeenCalledTimes(2);
   });
 
@@ -253,17 +276,17 @@ describe("GET /api/health", () => {
   });
 
   it("starts the cache lifetime when the checks complete", async () => {
-    checks.prisma.mockImplementationOnce(() => new Promise((resolve) => setTimeout(resolve, 1_000)));
+    checks.mail.mockImplementationOnce(() => new Promise((resolve) => setTimeout(resolve, 1_000)));
     const pending = GET();
     await vi.advanceTimersByTimeAsync(1_000);
     await pending;
 
     await vi.advanceTimersByTimeAsync(59_999);
     await GET();
-    expect(checks.prisma).toHaveBeenCalledOnce();
+    expect(checks.mail).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(1);
     await GET();
-    expect(checks.prisma).toHaveBeenCalledTimes(2);
+    expect(checks.mail).toHaveBeenCalledTimes(2);
   });
 
   it("checks Giphy only every five minutes while other checks keep refreshing", async () => {
@@ -300,7 +323,7 @@ describe("GET /api/health", () => {
     const pending = GET();
     await vi.advanceTimersByTimeAsync(25);
     const original = await (await pending).json();
-    expect(original.fuses.giphy).toEqual({ success: true, durationMs: 25 });
+    expect(original.fuses.giphy).toMatchObject({ success: true, durationMs: 25 });
 
     await vi.advanceTimersByTimeAsync(60_000);
     const refreshed = await (await GET()).json();
@@ -331,7 +354,7 @@ describe("GET /api/health", () => {
     ({ GET } = await import("./route"));
     const health = await GET();
     expect(health.status).toBe(200);
-    expect((await health.json()).fuses.giphy).toEqual({ success: true, durationMs: 0 });
+    expect((await health.json()).fuses.giphy).toMatchObject({ success: true, durationMs: 0 });
     expect(checks.giphy).not.toHaveBeenCalled();
     expect(giphySearch).toHaveBeenCalledExactlyOnceWith("cats", { limit: 20, rating: "g" });
   });
@@ -347,16 +370,19 @@ describe("GET /api/health", () => {
     const unhealthy = await GET();
     expect(unhealthy.status).toBe(500);
     const body = await unhealthy.json();
-    expect(body.status).toBe("error");
+    expect(body.status).toBe("degraded");
     expect(body.fuses.giphy).toEqual({
-      success: false, durationMs: 25, error: "Health check giphy failed", code: "RATE_LIMITED",
+      success: false, status: "unavailable", required: false, durationMs: 25, checkedAt: expect.any(String),
+      error: "Health check giphy failed", code: "RATE_LIMITED",
     });
     expect(JSON.stringify(body)).not.toContain("Sensitive provider details");
 
+    // Recovery needs a search that started after the failure was observed.
+    await vi.advanceTimersByTimeAsync(1);
     expect((await searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search?q=dogs"))).status).toBe(200);
     const recovered = await GET();
     expect(recovered.status).toBe(200);
-    expect((await recovered.json()).fuses.giphy).toEqual({ success: true, durationMs: 0 });
+    expect((await recovered.json()).fuses.giphy).toMatchObject({ success: true, durationMs: 0 });
     expect(checks.prisma).toHaveBeenCalledOnce();
     expect(checks.mail).toHaveBeenCalledOnce();
     expect(checks.giphy).toHaveBeenCalledOnce();
@@ -385,13 +411,13 @@ describe("GET /api/health", () => {
     expect(giphySearch).not.toHaveBeenCalled();
   });
 
-  it("records missing API keys even when the overall health result is cached", async () => {
+  it("treats a removed Giphy key as disabled even after searches recorded it", async () => {
     expect((await GET()).status).toBe(200);
     vi.stubEnv("GIPHY_API_KEY", "");
     expect((await searchGiphy(new NextRequest("https://local.dev/api/community/giphy/search?q=cats"))).status).toBe(503);
     const health = await GET();
-    expect(health.status).toBe(500);
-    expect((await health.json()).fuses.giphy).toMatchObject({ success: false, code: "MISSING_API_KEY" });
+    expect(health.status).toBe(200);
+    expect((await health.json()).fuses.giphy).toMatchObject({ status: "disabled", code: "NOT_CONFIGURED" });
     expect(checks.prisma).toHaveBeenCalledOnce();
   });
 
@@ -411,5 +437,295 @@ describe("GET /api/health", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     await GET();
     expect(checks.giphy).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs SELECT 1 at most once per hour while pg_isready and Redis refresh every minute", async () => {
+    vi.stubEnv("CACHE_TTL_MS", "30000");
+    vi.resetModules();
+    ({ GET } = await import("./route"));
+    for (let tick = 0; tick < 120; tick++) {
+      expect((await GET()).status).toBe(200);
+      await vi.advanceTimersByTimeAsync(30_000);
+    }
+    // 120 polls over 60 minutes: one SQL check, one pg_isready/PING per minute.
+    expect(checks.prisma).toHaveBeenCalledOnce();
+    expect(checks.postgres).toHaveBeenCalledTimes(60);
+    expect(checks.redis).toHaveBeenCalledTimes(60);
+    expect(checks.mail).toHaveBeenCalledTimes(120);
+
+    await GET();
+    expect(checks.prisma).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports the last SQL check time while reusing its result", async () => {
+    const first = (await (await GET()).json()).fuses.prisma;
+    await vi.advanceTimersByTimeAsync(59 * 60_000);
+    const cached = (await (await GET()).json()).fuses.prisma;
+    expect(cached).toEqual(first);
+    expect(Date.now() - Date.parse(cached.checkedAt)).toBe(59 * 60_000);
+  });
+
+  it("shares one in-flight SQL check across concurrent requests after the bundle cache expires", async () => {
+    await GET();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    checks.prisma.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 500)));
+    const pending = Promise.all(Array.from({ length: 10 }, () => GET()));
+    await vi.advanceTimersByTimeAsync(500);
+    await pending;
+    expect(checks.prisma).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a failed SQL check after one minute instead of one hour", async () => {
+    checks.prisma.mockRejectedValueOnce(Object.assign(new Error("down"), { code: "P1001" }));
+    const failed = await GET();
+    expect(failed.status).toBe(500);
+    expect((await failed.json()).status).toBe("error");
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect((await GET()).status).toBe(500);
+    expect(checks.prisma).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await GET()).status).toBe(200);
+    expect(checks.prisma).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches SQL timeouts as failures without overlapping checks", async () => {
+    checks.prisma.mockReturnValue(new Promise(() => {}));
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await (await pending).json()).fuses.prisma).toMatchObject({ status: "unavailable", code: "HEALTH_CHECK_TIMEOUT" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await GET();
+    expect(checks.prisma).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["postgres", "PG_ISREADY_MISSING", "unknown"],
+    ["redis", "REDIS_NOT_CONFIGURED", "unavailable"],
+    ["postgres", "DATABASE_URL_MISSING", "unavailable"],
+  ] as const)("fails when required %s cannot be verified (%s)", async (name, code, state) => {
+    checks[name].mockRejectedValue(Object.assign(new Error("not verifiable"), { code }));
+    const response = await GET();
+    const body = await response.json();
+    expect(response.status).toBe(500);
+    expect(body.status).toBe("error");
+    expect(body.fuses[name]).toMatchObject({ success: false, status: state, required: true, code });
+  });
+
+  it("does not require pg_isready when Prisma Accelerate has no PostgreSQL socket", async () => {
+    checks.postgres.mockRejectedValue(Object.assign(new Error("n/a"), { code: "PG_ISREADY_NOT_APPLICABLE" }));
+    const response = await GET();
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.fuses.postgres).toMatchObject({ status: "disabled", code: "PG_ISREADY_NOT_APPLICABLE" });
+  });
+
+  it("never reports ok before the initial checks finish", async () => {
+    checks.prisma.mockReturnValue(new Promise(() => {}));
+    let settled = false;
+    const pending = GET().then((response) => { settled = true; return response; });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const response = await pending;
+    expect(response.status).toBe(500);
+    expect((await response.json()).fuses.prisma).toMatchObject({ status: "unavailable", code: "HEALTH_CHECK_TIMEOUT" });
+  });
+
+  it("never reports an expired SQL success as healthy when the refresh hangs", async () => {
+    expect((await GET()).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    checks.prisma.mockReturnValue(new Promise(() => {}));
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(10_000);
+    const response = await pending;
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.status).toBe("error");
+    expect(body.fuses.prisma).toMatchObject({ status: "unavailable", code: "HEALTH_CHECK_TIMEOUT" });
+  });
+
+  it.each(["postgres", "redis"] as const)("refreshes an expired %s success and reports a new failure", async (name) => {
+    expect((await GET()).status).toBe(200);
+    checks[name].mockRejectedValue(Object.assign(new Error("down"), { code: "ECONNREFUSED" }));
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect((await GET()).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(1);
+    const response = await GET();
+    expect(response.status).toBe(500);
+    expect((await response.json()).fuses[name]).toMatchObject({ status: "unavailable", code: "ECONNREFUSED" });
+    expect(checks[name]).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["postgres", "redis"] as const)("reports %s recovery within one minute", async (name) => {
+    checks[name].mockRejectedValueOnce(Object.assign(new Error("down"), { code: "ECONNREFUSED" }));
+    expect((await GET()).status).toBe(500);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await GET()).status).toBe(500);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await GET()).status).toBe(200);
+    expect(checks[name]).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not start a second check while a timed-out one is still running", async () => {
+    let finish: (value: boolean) => void = () => {};
+    checks.redis.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await (await pending).json()).fuses.redis).toMatchObject({ code: "HEALTH_CHECK_TIMEOUT" });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    const stillRunning = await GET();
+    expect(stillRunning.status).toBe(500);
+    expect((await stillRunning.json()).fuses.redis).toMatchObject({ status: "unavailable", code: "HEALTH_CHECK_STILL_RUNNING" });
+    expect(checks.redis).toHaveBeenCalledOnce();
+
+    finish(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect((await GET()).status).toBe(200);
+    expect(checks.redis).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares one refresh between concurrent requests once a cached result expires", async () => {
+    await GET();
+    await vi.advanceTimersByTimeAsync(60_000);
+    checks.postgres.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(true), 200)));
+    const pending = Promise.all(Array.from({ length: 10 }, () => GET()));
+    await vi.advanceTimersByTimeAsync(200);
+    for (const response of await pending) expect(response.status).toBe(200);
+    expect(checks.postgres).toHaveBeenCalledTimes(2);
+  });
+
+  // Simulates a store that hands back an expired success, e.g. after a wall-clock jump.
+  const stubSignal = (name: string, success: { success: boolean; durationMs: number; checkedAt?: string }) =>
+    vi.stubGlobal("ventryHealthSignals", new Map([[name, {
+      success, successAt: performance.now(), successStartedAt: performance.now(), failureAt: -Infinity,
+    }]]));
+
+  it("reports a success older than its freshness limit as stale", async () => {
+    stubSignal("giphy", { success: true, durationMs: 0, checkedAt: new Date(Date.now() - 6 * 60_000).toISOString() });
+    const response = await GET();
+    const body = await response.json();
+    expect(response.status).toBe(500);
+    expect(body.status).toBe("degraded");
+    expect(body.fuses.giphy).toMatchObject({ success: true, status: "stale" });
+  });
+
+  it("reports a success without a check time as stale", async () => {
+    stubSignal("giphy", { success: true, durationMs: 0 });
+    expect((await (await GET()).json()).fuses.giphy.status).toBe("stale");
+  });
+
+  it("reports a stale observed SQL success as an error", async () => {
+    stubSignal("prisma", { success: true, durationMs: 0, checkedAt: new Date(Date.now() - 61 * 60_000).toISOString() });
+    const body = await (await GET()).json();
+    expect(body.status).toBe("error");
+    expect(body.fuses.prisma.status).toBe("stale");
+  });
+
+  describe("passive Prisma query signals", () => {
+    let recordHealthSignal: typeof import("@/lib/health-signals").recordHealthSignal;
+    const outage = { success: false, durationMs: 3, error: "Database query failed", code: "P1001" };
+    const query = { success: true, durationMs: 4 };
+
+    beforeEach(async () => {
+      ({ recordHealthSignal } = await import("@/lib/health-signals"));
+    });
+
+    it("uses a recent real query instead of SELECT 1", async () => {
+      recordHealthSignal("prisma", query);
+      const response = await GET();
+      expect(response.status).toBe(200);
+      expect((await response.json()).fuses.prisma).toMatchObject({ status: "healthy", durationMs: 4 });
+      expect(checks.prisma).not.toHaveBeenCalled();
+    });
+
+    it("keeps skipping SELECT 1 while real queries keep succeeding", async () => {
+      for (let minute = 0; minute < 180; minute++) {
+        recordHealthSignal("prisma", query);
+        expect((await GET()).status).toBe(200);
+        await vi.advanceTimersByTimeAsync(60_000);
+      }
+      expect(checks.prisma).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the hourly SELECT 1 once real queries stop", async () => {
+      recordHealthSignal("prisma", query);
+      await vi.advanceTimersByTimeAsync(60 * 60_000 - 1);
+      await GET();
+      expect(checks.prisma).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await GET();
+      expect(checks.prisma).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(59 * 60_000);
+      await GET();
+      expect(checks.prisma).toHaveBeenCalledOnce();
+    });
+
+    it("reports a real query outage immediately, even right after a successful probe", async () => {
+      expect((await GET()).status).toBe(200);
+      recordHealthSignal("prisma", outage);
+      const response = await GET();
+      const body = await response.json();
+      expect(response.status).toBe(500);
+      expect(body.status).toBe("error");
+      expect(body.fuses.prisma).toMatchObject({ status: "unavailable", code: "P1001", error: "Database query failed" });
+      expect(checks.prisma).toHaveBeenCalledOnce();
+    });
+
+    it("recovers from a query that started after the failure, without a probe", async () => {
+      recordHealthSignal("prisma", outage);
+      await vi.advanceTimersByTimeAsync(5_000);
+      recordHealthSignal("prisma", query);
+      expect((await GET()).status).toBe(200);
+      expect(checks.prisma).not.toHaveBeenCalled();
+    });
+
+    it("does not let a slow query that started before the failure hide it", async () => {
+      const slowStartedAt = performance.now();
+      await vi.advanceTimersByTimeAsync(1_000);
+      recordHealthSignal("prisma", outage);
+      await vi.advanceTimersByTimeAsync(1_000);
+      recordHealthSignal("prisma", query, slowStartedAt);
+      const body = await (await GET()).json();
+      expect(body.fuses.prisma).toMatchObject({ status: "unavailable", code: "P1001" });
+    });
+
+    it("probes for recovery once a failure is a minute old and nothing else arrived", async () => {
+      recordHealthSignal("prisma", outage);
+      await vi.advanceTimersByTimeAsync(59_999);
+      expect((await GET()).status).toBe(500);
+      expect(checks.prisma).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await GET()).status).toBe(200);
+      expect(checks.prisma).toHaveBeenCalledOnce();
+    });
+
+    it("keeps reporting a failed recovery probe", async () => {
+      recordHealthSignal("prisma", outage);
+      checks.prisma.mockRejectedValue(Object.assign(new Error("down"), { code: "P1001" }));
+      await vi.advanceTimersByTimeAsync(60_000);
+      const body = await (await GET()).json();
+      expect(body.fuses.prisma).toMatchObject({ status: "unavailable", code: "P1001" });
+      expect(checks.prisma).toHaveBeenCalledOnce();
+    });
+
+    it("shares one fallback probe between concurrent requests", async () => {
+      checks.prisma.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(true), 200)));
+      const pending = Promise.all(Array.from({ length: 10 }, () => GET()));
+      await vi.advanceTimersByTimeAsync(200);
+      for (const response of await pending) expect(response.status).toBe(200);
+      expect(checks.prisma).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("reports pg_isready failures as a database error", async () => {
+    checks.postgres.mockRejectedValue(Object.assign(new Error("pg_isready failed"), { code: "PG_ISREADY_NO_RESPONSE" }));
+    const response = await GET();
+    const body = await response.json();
+    expect(response.status).toBe(500);
+    expect(body.status).toBe("error");
+    expect(body.fuses.postgres).toMatchObject({ status: "unavailable", code: "PG_ISREADY_NO_RESPONSE" });
   });
 });

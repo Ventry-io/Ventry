@@ -13,6 +13,8 @@ const routes: Array<{ pattern: URLPattern, mw: SubMW }> = [
 export async function proxy(req: NextRequest) {
     const res = NextResponse.next();
     const pathname = req.nextUrl.pathname;
+    // Process liveness only; keep it free of middleware work and log noise.
+    if (pathname === "/api/health/live") return res;
 
     // Require private booking details before entering event registration.
     const profileCheck = await mws.profileCompletion.middleware(req);

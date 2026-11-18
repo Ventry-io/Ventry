@@ -85,6 +85,15 @@ export function isRedisConfigured() {
   return Boolean(redisUrl);
 }
 
+/** Reuses the shared client, so health checks never open extra connections. */
+export async function pingRedis(): Promise<boolean> {
+  if (!redisUrl) {
+    throw Object.assign(new Error("REDIS_URL is not configured"), { code: "REDIS_NOT_CONFIGURED" });
+  }
+  const redis = await ensureRedis();
+  return (await redis.ping()) === "PONG";
+}
+
 export async function publishMessage(channel: string, message: string): Promise<void> {
   const redis = await ensureRedis();
   await redis.publish(channel, message);

@@ -1,6 +1,7 @@
 import { PrismaClient } from "@/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { withAccelerate } from "@prisma/extension-accelerate";
+import { queryHealthExtension } from "./query-health";
 
 const accelerateFetch: typeof fetch = (input, init) =>
   fetch(input, {
@@ -14,11 +15,12 @@ export function createPrismaClient(): PrismaClient {
 
   if (isAccelerateUrl(databaseUrl)) {
     return new PrismaClient({ accelerateUrl: databaseUrl })
-      .$extends(withAccelerate({ fetch: accelerateFetch })) as unknown as PrismaClient;
+      .$extends(withAccelerate({ fetch: accelerateFetch }))
+      .$extends(queryHealthExtension) as unknown as PrismaClient;
   }
 
   const adapter = new PrismaPg({ connectionString: databaseUrl });
-  return new PrismaClient({ adapter });
+  return new PrismaClient({ adapter }).$extends(queryHealthExtension) as unknown as PrismaClient;
 }
 
 function isAccelerateUrl(databaseUrl: string): boolean {

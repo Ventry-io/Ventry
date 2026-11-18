@@ -14,6 +14,7 @@ services:
       redis:
         condition: service_healthy
     networks:
+      venuva-internal:
       caddy-public:
         aliases:
           - venuva-dev
@@ -31,6 +32,8 @@ services:
       retries: 5
     volumes:
       - venuva-redis-dev-data:/data
+    networks:
+      - venuva-internal
 
 volumes:
   venuva-redis-dev-data:
@@ -39,3 +42,7 @@ networks:
   caddy-public:
     external: true
     name: caddy-public
+
+  venuva-internal:
+  driver: bridge
+  internal: true

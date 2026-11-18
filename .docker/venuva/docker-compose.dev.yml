@@ -44,5 +44,5 @@ networks:
     name: caddy-public
 
   venuva-internal:
-  driver: bridge
-  internal: true
+    driver: bridge
+    internal: true

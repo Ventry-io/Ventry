@@ -30,8 +30,6 @@ export default function RootLayout({
             <Providers>
               <AppHeader />
               <main style={{ display: "flex", flex: "1 0 auto", flexDirection: "column" }}>
-                {/* Spacer so page content is never hidden under the fixed AppBar */}
-                <div style={{ height: 64 }} />
                 {children}
               </main>
               <AppFooter />

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import EventForm from '@/components/admin/events/EventForm';
 import type { AdminCreateEventInput } from '@/types/schemas/event/admin';
-import { Box } from '@mui/material';
+import { Alert, Box, Button } from '@mui/material';
 import type { SerializedEvent } from '@/types/event';
 import { diffPayload } from '@/lib/diffPayload';
 
@@ -12,6 +12,7 @@ import type { InitialData } from '@/components/admin/events/EventForm';
 
 interface EditEventClientProps {
   event: SerializedEvent;
+  canWrite?: boolean;
 }
 
 // Structural fields (nested objects/arrays) aren't diffed - EventForm rebuilds
@@ -19,7 +20,7 @@ interface EditEventClientProps {
 // the server snapshot would produce noisy false-positives. Always sent as-is.
 const STRUCTURAL_FIELDS = ["location", "products", "stayPolicy", "customFields", "schedule"] as const;
 
-export default function EditEventClient({ event }: EditEventClientProps) {
+export default function EditEventClient({ event, canWrite = true }: EditEventClientProps) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
@@ -56,7 +57,7 @@ export default function EditEventClient({ event }: EditEventClientProps) {
         throw new Error(errorData.error || 'Failed to update event');
       }
 
-      router.push('/admin/events');
+      router.push(`/admin?eventId=${event.id}`);
       router.refresh();
     } catch (err) {
       console.error(err);
@@ -68,7 +69,13 @@ export default function EditEventClient({ event }: EditEventClientProps) {
 
   return (
     <Box sx={{ py: 4 }}>
-      <EventForm initialData={event as unknown as InitialData} onSubmit={handleSubmit} loading={loading} />
+      {!canWrite ? <Alert severity="info" sx={{ mb: 2 }}>You have read-only access. Contact the organization owner to edit this event.</Alert> : null}
+      <Alert severity="info" sx={{ mb: 2 }} action={<Button href={`/admin/events/${event.id}/page-designer`}>Open page designer</Button>}>
+        Design the public event page, subpages, menu and custom CSS in the page designer.
+      </Alert>
+      <Box component="fieldset" disabled={!canWrite} sx={{ border: 0, p: 0, m: 0, minWidth: 0 }}>
+        <EventForm initialData={event as unknown as InitialData} onSubmit={handleSubmit} loading={loading || !canWrite} />
+      </Box>
     </Box>
   );
 }

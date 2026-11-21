@@ -80,3 +80,33 @@ export async function clearProductStock(productId: string): Promise<void> {
     const redis = await ensureRedis();
     await redis.del(key);
 }
+
+export function isRedisConfigured() {
+  return Boolean(redisUrl);
+}
+
+/** Reuses the shared client, so health checks never open extra connections. */
+export async function pingRedis(): Promise<boolean> {
+  if (!redisUrl) {
+    throw Object.assign(new Error("REDIS_URL is not configured"), { code: "REDIS_NOT_CONFIGURED" });
+  }
+  const redis = await ensureRedis();
+  return (await redis.ping()) === "PONG";
+}
+
+export async function publishMessage(channel: string, message: string): Promise<void> {
+  const redis = await ensureRedis();
+  await redis.publish(channel, message);
+}
+
+/** Subscriber connections cannot run normal commands, so they get their own connection. */
+export async function createSubscriber(): Promise<Redis> {
+  const subscriber = getRedis().duplicate({ enableOfflineQueue: true, maxRetriesPerRequest: null });
+  subscriber.on("error", (error) => {
+    console.error("[redis] Subscriber error:", error.message);
+  });
+  if (subscriber.status === "wait") {
+    await subscriber.connect();
+  }
+  return subscriber;
+}

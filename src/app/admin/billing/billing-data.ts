@@ -1,10 +1,12 @@
-import { adminEventFilter } from "@/lib/auth/admin";
+import { withEventScope } from "@/lib/events/admin-context";
+import { getAdminFinanceAccess } from "@/lib/auth/admin";
 import { prisma } from "@/lib/prisma/prisma";
 import { estimatePlatformFees } from "@/lib/billing/platformFee";
 
-export async function getBillingData(adminId: string, orgScope?: string) {
-    const eventFilter = await adminEventFilter(adminId, orgScope);
-    const paymentEventFilter = { registration: { event: eventFilter } };
+export async function getBillingData(adminId: string, orgScope?: string, eventId?: string) {
+    const { eventFilter, hasRestrictedOrganizations } = await getAdminFinanceAccess(adminId, orgScope);
+    if (!eventFilter) return null;
+    const paymentEventFilter = { registration: { event: eventId ? withEventScope(eventFilter, eventId) : eventFilter } };
 
     const [byStatus, recentPayments, revenueByEvent, completedForFeeEstimate] = await Promise.all([
         prisma.payment.groupBy({
@@ -63,6 +65,7 @@ export async function getBillingData(adminId: string, orgScope?: string) {
     const netRevenue = completed.sum - stripeFees - platformFees;
 
     return {
+        hasRestrictedOrganizations,
         completed,
         pending,
         failed,

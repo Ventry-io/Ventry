@@ -20,10 +20,14 @@ vi.mock("@/lib/auth/admin", () => ({
   ),
 }));
 
-vi.mock("@/lib/supabase", () => ({
+vi.mock("@/lib/supabase", async () => ({
+  ...await vi.importActual<object>("@/lib/supabase"),
   uploadEventImage: vi.fn(),
   getSignedUrl: vi.fn(),
 }));
+
+const eventAccess = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/auth/event-admin", () => ({ checkEventAdminAuth: eventAccess }));
 
 function installSharpMock() {
   sharpMocks.sharp.mockImplementation(() => {
@@ -52,6 +56,7 @@ describe("App Router: /api/admin/media/upload", () => {
     sharpMocks.toBuffer.mockResolvedValue(Buffer.from("optimized-banner"));
     installSharpMock();
     mockedCheckAdminAuth.mockResolvedValue({ authorized: true, adminId: "admin-1" });
+    eventAccess.mockResolvedValue({ authorized: true });
     mockedUploadEventImage.mockResolvedValue({ path: "events/event-new.jpg" });
     mockedGetSignedUrl.mockResolvedValue({
       signedUrl: "https://cdn.example.com/event-new",
@@ -59,62 +64,40 @@ describe("App Router: /api/admin/media/upload", () => {
     });
   });
 
-  it("uploads event banners to the banners bucket and signs from that bucket", async () => {
-    const mockFile = {
-      size: 1024,
-      arrayBuffer: vi.fn().mockResolvedValue(Buffer.from("raw-banner")),
-    } as unknown as File;
-
-    const request = {
+  function post(fields: Record<string, string>) {
+    const file = { size: 1024, arrayBuffer: vi.fn().mockResolvedValue(Buffer.from("raw")) } as unknown as File;
+    return mediaRoute.POST({
       headers: new Headers(),
-      formData: vi.fn().mockResolvedValue({
-        get: vi.fn((key: string) => {
-          if (key === "file") return mockFile;
-          if (key === "mode") return "banner";
-          return null;
-        }),
-      }),
-    } as unknown as NextRequest;
+      formData: vi.fn().mockResolvedValue({ get: vi.fn((key: string) => key === "file" ? file : fields[key] ?? null) }),
+    } as unknown as NextRequest);
+  }
 
-    const response = await mediaRoute.POST(request);
+  it("keeps banners uploaded before the event exists in the admin's drafts folder", async () => {
+    const response = await post({ mode: "banner" });
 
     expect(response.status).toBe(200);
-    expect(mockedUploadEventImage).toHaveBeenCalledWith(
-      expect.any(Buffer),
-      expect.stringMatching(/^event-.*\.jpg$/),
-      "banners",
-    );
-    expect(mockedGetSignedUrl).toHaveBeenCalledWith(
-      "events/event-new.jpg",
-      365 * 24 * 60 * 60,
-      "banners",
-    );
+    expect(eventAccess).not.toHaveBeenCalled();
+    expect(mockedUploadEventImage).toHaveBeenCalledWith(expect.any(Buffer), expect.stringMatching(/^drafts\/admin-1\/banner\/[\w-]+\.jpg$/), "banners");
+    expect(mockedGetSignedUrl).toHaveBeenCalledWith("events/event-new.jpg", 10 * 365 * 24 * 60 * 60, "banners");
   });
 
-  it("keeps badge photos in the profile bucket", async () => {
-    const mockFile = {
-      size: 1024,
-      arrayBuffer: vi.fn().mockResolvedValue(Buffer.from("raw-photo")),
-    } as unknown as File;
+  it("stores event media in the event's folders after checking write access", async () => {
+    expect((await post({ mode: "banner", eventId: "7" })).status).toBe(200);
+    expect((await post({ mode: "badge-background", eventId: "7" })).status).toBe(200);
+    expect((await post({ mode: "badge-photo", eventId: "7" })).status).toBe(200);
 
-    const request = {
-      headers: new Headers(),
-      formData: vi.fn().mockResolvedValue({
-        get: vi.fn((key: string) => {
-          if (key === "file") return mockFile;
-          if (key === "mode") return "badge-photo";
-          return null;
-        }),
-      }),
-    } as unknown as NextRequest;
+    expect(eventAccess).toHaveBeenCalledWith(7, expect.any(Headers), undefined, true);
+    expect(mockedUploadEventImage.mock.calls.map(call => [call[1].replace(/[\w-]+\.jpg$/, "*"), call[2]])).toEqual([
+      ["events/7/banner/*", "banners"],
+      ["events/7/badges/*", "banners"],
+      ["events/7/badge-photos/*", "profile"],
+    ]);
+  });
 
-    const response = await mediaRoute.POST(request);
-
-    expect(response.status).toBe(200);
-    expect(mockedUploadEventImage).toHaveBeenCalledWith(
-      expect.any(Buffer),
-      expect.stringMatching(/^badge-photo-.*\.jpg$/),
-      "profile",
-    );
+  it("rejects invalid or foreign events before storing anything", async () => {
+    expect((await post({ eventId: "../1" })).status).toBe(400);
+    eventAccess.mockResolvedValue({ authorized: false, error: "Forbidden" });
+    expect((await post({ eventId: "8" })).status).toBe(403);
+    expect(mockedUploadEventImage).not.toHaveBeenCalled();
   });
 });

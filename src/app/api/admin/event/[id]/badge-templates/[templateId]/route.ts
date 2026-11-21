@@ -7,7 +7,7 @@ import { badgeTemplatePatchSchema } from "@/types/schemas/badge";
 import { z } from "zod";
 
 async function authorize(eventId: number, request: NextRequest) {
-  const authResult = await checkEventAdminAuth(eventId, request.headers);
+  const authResult = await checkEventAdminAuth(eventId, request.headers, undefined, true);
   if (!authResult.authorized) {
     return NextResponse.json({ error: authResult.error || "Forbidden" }, { status: 403 });
   }

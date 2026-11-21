@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import { turnstileEnabled } from "./Turnstile";
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import ky from "ky";
@@ -19,8 +20,9 @@ import { green } from "@mui/material/colors";
 import type { PendingAccountLink } from "@/generated/prisma";
 import authClient from "@/lib/auth/client";
 import LastUsedIndicator from "./LastUsedIndicator";
+import { getCallbackPath } from "@/lib/auth/callback";
 
-export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
+export default function LoginForm({ callbackUrl, captchaToken = "", resetCaptcha = () => {} }: { callbackUrl?: string; captchaToken?: string; resetCaptcha?: () => void }) {
     const [formData, setFormData] = useState({
         email: "",
         password: ""
@@ -41,7 +43,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
         try {
             setLoading(true);
 
-            const { error } = await authClient.signIn.passkey();
+            const { error } = await authClient.signIn.passkey({ fetchOptions: { headers: { "x-captcha-response": captchaToken } } });
             if (error) {
                 const message = error.message || error.statusText || "Passkey authentication failed";
                 const status = error.status ? ` (${error.status})` : "";
@@ -56,6 +58,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             setError("Passkey login failed");
         } finally {
             setLoading(false);
+            resetCaptcha();
         }
     }
 
@@ -75,7 +78,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                 email: formData.email,
                 password: formData.password,
                 rememberMe: rememberMe
-            })
+            }, { headers: { "x-captcha-response": captchaToken } })
             if(error) {
                 setError(error.message ?? error.statusText);
                 setLoading(false);
@@ -111,7 +114,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             }
 
             // No pending links, go to home or callback URL
-            router.push(callbackUrl || "/");
+            router.push(getCallbackPath(callbackUrl));
 
         } catch(err: unknown) {
             if(err instanceof Error) {
@@ -119,6 +122,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
             }
         } finally {
             setLoading(false);
+            resetCaptcha();
         }
     }
 
@@ -190,6 +194,11 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                     }}
                 />
                 <LastUsedIndicator loginMethod="email" />
+                {error && (
+                    <Button href={`/check-email?email=${encodeURIComponent(formData.email)}&callbackUrl=${encodeURIComponent(getCallbackPath(callbackUrl))}`}>
+                        Need a new email confirmation link?
+                    </Button>
+                )}
                 <Button
                     // type={(loading || success) ? "button" : "submit"}
                     type="submit"
@@ -197,7 +206,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                     variant="contained"
                     color={buttonColor}
                     sx={buttonSx}
-                    disabled={loading || success}
+                    disabled={loading || success || turnstileEnabled && !captchaToken}
                 >
                     <span style={{
                         visibility: (loading || success) ? "hidden" : "visible",
@@ -214,7 +223,7 @@ export default function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
                 </Button>
 
                 <LoginMethodBox>
-                    <Button onClick={() => void doPasskeyLogin()} disabled={loading || success} className="w-full rounded-xl border px-4 py-2">
+                    <Button onClick={() => void doPasskeyLogin()} disabled={loading || success || turnstileEnabled && !captchaToken} className="w-full rounded-xl border px-4 py-2">
                     <Icon className="fa-solid fa-fingerprint" sx={{ mr: 1 }} />
                         Login with Passkey
                     </Button>

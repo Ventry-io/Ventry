@@ -1,5 +1,5 @@
 import { formatTicketQrPayload } from "@/lib/tickets/qr";
-import type { BadgeElement, BadgeTemplateInput } from "@/types/schemas/badge";
+import type { BadgeCondition, BadgeElement, BadgeTemplateInput } from "@/types/schemas/badge";
 
 export type BadgeAttendee = {
   id: string;
@@ -11,9 +11,57 @@ export type BadgeAttendee = {
   email: string;
   photoUrl: string | null;
   ticketTier: string | null;
+  crewDepartment?: string | null;
+  crewRole?: string | null;
   eventName: string;
   customFieldData: Record<string, string | number | boolean | null>;
+  data?: Record<string, unknown>;
 };
+
+export function getBadgeConditionValue(attendee: BadgeAttendee, field: string): unknown {
+  const source = { ...attendee.data, ...attendee };
+  return field.split(".").reduce<unknown>((value, key) =>
+    value && typeof value === "object" && !["__proto__", "prototype", "constructor"].includes(key) && Object.hasOwn(value, key)
+      ? (value as Record<string, unknown>)[key] : undefined, source);
+}
+
+export function matchesBadgeConditions(conditions: BadgeCondition[] | undefined, attendee: BadgeAttendee) {
+  return (conditions || []).every(condition => {
+    const actual = getBadgeConditionValue(attendee, condition.field);
+    const empty = actual === null || actual === undefined || actual === "";
+    if (condition.operator === "isEmpty") return empty;
+    if (condition.operator === "isNotEmpty") return !empty;
+    // Unknown fields fail closed, including negative comparisons.
+    if (actual === undefined || actual === null || typeof actual === "object") return false;
+    const value = String(actual);
+    switch (condition.operator) {
+      case "equals": return value === condition.value;
+      case "notEquals": return value !== condition.value;
+      case "contains": return value.includes(condition.value);
+      case "greaterThan":
+      case "lessThan": {
+        if (!value.trim() || !condition.value.trim()) return false;
+        const left = Number(value);
+        const right = Number(condition.value);
+        return Number.isFinite(left) && Number.isFinite(right) &&
+          (condition.operator === "greaterThan" ? left > right : left < right);
+      }
+    }
+  });
+}
+
+export function resolveBadgeTemplate(template: BadgeTemplateInput, attendee: BadgeAttendee): BadgeTemplateInput {
+  const rule = template.background.rules?.find(rule => matchesBadgeConditions(rule.conditions, attendee));
+  return {
+    ...template,
+    background: {
+      ...template.background,
+      ...(rule?.color !== undefined ? { color: rule.color } : {}),
+      ...(rule?.imageUrl !== undefined ? { imageUrl: rule.imageUrl } : {}),
+    },
+    elements: template.elements.filter(element => matchesBadgeConditions(element.conditions, attendee)),
+  };
+}
 
 export type BadgeTemplate = BadgeTemplateInput & {
   id: string;
@@ -132,6 +180,10 @@ export function getBadgeElementValue(element: BadgeElement, attendee: BadgeAtten
       return `#${attendee.ticketId}`;
     case "ticketTier":
       return attendee.ticketTier || "Ticket";
+    case "crewDepartment":
+      return attendee.crewDepartment || "";
+    case "crewRole":
+      return attendee.crewRole || "";
     case "eventName":
       return attendee.eventName;
     case "customField": {
@@ -144,6 +196,8 @@ export function getBadgeElementValue(element: BadgeElement, attendee: BadgeAtten
       return formatTicketQrPayload({ eventId, ticketId: attendee.ticketId });
     case "photo":
       return attendee.photoUrl || "";
+    case "image":
+      return element.imageUrl || "";
     case "rectangle":
     case "ellipse":
     case "line":
@@ -273,6 +327,7 @@ export function normalizeBadgeTemplate(raw: {
       fallbackPhotoUrls: Array.isArray(rawBackground.fallbackPhotoUrls)
         ? rawBackground.fallbackPhotoUrls.filter((url): url is string => typeof url === "string")
         : [],
+      rules: rawBackground.rules || [],
     },
     elements: Array.isArray(raw.elements)
       ? (raw.elements as BadgeTemplateInput["elements"])

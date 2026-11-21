@@ -27,6 +27,10 @@ export async function GET(
     select: {
       adminId: true,
       permissions: true,
+      accessLevel: true,
+      departmentId: true,
+      role: true,
+      department: { select: { name: true } },
       joinedAt: true,
       admin: {
         select: {

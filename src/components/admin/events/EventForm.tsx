@@ -77,6 +77,8 @@ type ProductDraft = {
   description: string;
   price: number;
   capacity: number | null;
+  minOccupants: number;
+  maxOccupants: number;
 };
 
 type EventFormProduct = EventProduct & { id: string };
@@ -102,6 +104,8 @@ function createProductDraft(prefix: string): ProductDraft {
     description: "",
     price: 0,
     capacity: null,
+    minOccupants: 1,
+    maxOccupants: 1,
   };
 }
 
@@ -112,6 +116,8 @@ function toProductDraft(product: EventFormProduct): ProductDraft {
     description: product.description || "",
     price: Number(product.price || 0),
     capacity: product.capacity ?? null,
+    minOccupants: Number(product.minOccupants ?? 1),
+    maxOccupants: Number(product.maxOccupants ?? 1),
   };
 }
 
@@ -241,10 +247,11 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
     },
   });
 
+  const [advanced, setAdvanced] = useState(!!initialData?.id);
   const [ticketProducts, setTicketProducts] = useState<ProductDraft[]>(
     initialProducts.filter(product => product.type === "TICKET").map(toProductDraft).length > 0
       ? initialProducts.filter(product => product.type === "TICKET").map(toProductDraft)
-      : [createProductDraft("ticket")],
+      : [],
   );
   const [addonProducts, setAddonProducts] = useState<ProductDraft[]>(
     initialProducts.filter(product => product.type === "ADDON").map(toProductDraft),
@@ -349,6 +356,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
     try {
       const formData = new FormData();
       formData.append("file", croppedBlob);
+      if (initialData?.id) formData.append("eventId", String(initialData.id));
 
       const response = await fetch("/api/admin/media/upload", {
         method: "POST",
@@ -546,6 +554,13 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
           };
         }
 
+        if (field === "minOccupants" || field === "maxOccupants") {
+          return {
+            ...roomType,
+            [field]: Math.max(1, Number(value || 1)),
+          };
+        }
+
         return {
           ...roomType,
           [field]: value,
@@ -613,6 +628,8 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
         price: roomType.price,
         type: "ACCOMMODATION" as const,
         capacity: roomType.capacity,
+        minOccupants: roomType.minOccupants,
+        maxOccupants: roomType.maxOccupants,
         order: orderCursor++,
       })),
     );
@@ -639,11 +656,6 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
   const onFormSubmit = async (formValues: AdminCreateEventInput) => {
     try {
       setError(null);
-
-      if (ticketProducts.length === 0) {
-        setError("Add at least one ticket type before saving the event.");
-        return;
-      }
 
       if ((mainLocationIsAccommodation || allowOverflowHotels) && hotels.length === 0) {
         setError("Add at least one hotel when accommodation is enabled.");
@@ -880,7 +892,12 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
   );
 
   return (
-    <Box component="form" onSubmit={event => { void handleSubmit(onFormSubmit)(event); }}>
+    <Box component="form" onSubmit={event => { void handleSubmit(onFormSubmit, invalid => {
+      setError("Please correct the highlighted fields before saving.");
+      const tab = invalid.location ? 1 : invalid.customFields ? 3 : invalid.schedule ? 4 : 0;
+      if (tab === 3 || tab === 4) setAdvanced(true);
+      setTabValue(tab);
+    })(event); }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">{initialData?.id ? "Edit Event" : "Create New Event"}</Typography>
         <Button
@@ -901,8 +918,10 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
         </Alert>
       )}
 
+      <FormControlLabel control={<Switch checked={advanced} onChange={event => { setAdvanced(event.target.checked); setTabValue(0); }} />} label="Advanced settings, tickets and additional features" />
+      {!advanced && <Alert severity="info" sx={{ mb: 2 }}>Create a simple event with basic details and a location. No ticket, price or payment provider is required.</Alert>}
       <Paper sx={{ mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} variant="fullWidth">
+        <Tabs value={tabValue} onChange={handleTabChange} variant="scrollable" scrollButtons="auto">
           <Tab
             label={
               <Stack direction="row" alignItems="center" gap={1}>
@@ -919,7 +938,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
               </Stack>
             }
           />
-          <Tab
+          <Tab sx={{ display: advanced ? undefined : "none" }}
             label={
               <Stack direction="row" alignItems="center" gap={1}>
                 Products
@@ -927,7 +946,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
               </Stack>
             }
           />
-          <Tab
+          <Tab sx={{ display: advanced ? undefined : "none" }}
             label={
               <Stack direction="row" alignItems="center" gap={1}>
                 Custom Fields
@@ -935,7 +954,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
               </Stack>
             }
           />
-          <Tab
+          <Tab sx={{ display: advanced ? undefined : "none" }}
             label={
               <Stack direction="row" alignItems="center" gap={1}>
                 Schedule
@@ -964,7 +983,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                     select
                     label="Status"
                     {...register("status")}
-                    defaultValue="DRAFT"
+                    defaultValue={initialData?.status || "DRAFT"}
                   >
                     <MenuItem value="DRAFT">Draft</MenuItem>
                     <MenuItem value="PUBLISHED">Published</MenuItem>
@@ -1022,6 +1041,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                 </Grid>
               </Grid>
 
+              <Stack spacing={3} sx={{ display: advanced ? undefined : "none" }}>
               <Divider />
               <Typography variant="h6">Publishing & Registration</Typography>
 
@@ -1071,7 +1091,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                     type="number"
                     label="Registration Limit"
                     placeholder="Unlimited"
-                    {...register("maxRegistrations", { valueAsNumber: true })}
+                    {...register("maxRegistrations", { setValueAs: value => value === "" || value == null ? null : Number(value) })}
                     error={!!errors.maxRegistrations}
                     helperText={errors.maxRegistrations?.message || "Max number of participants."}
                   />
@@ -1262,6 +1282,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                 </Grid>
               </Grid>
 
+              </Stack>
               <Box>
                 <Typography variant="subtitle2" gutterBottom>Event Banner</Typography>
                 {watchImageUrl && (
@@ -1340,6 +1361,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                 </Grid>
               </Grid>
 
+              <Stack spacing={3} sx={{ display: advanced ? undefined : "none" }}>
               <Divider />
               <Typography variant="h6">Accommodation Setup</Typography>
 
@@ -1458,6 +1480,8 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                                     product={roomType}
                                     nameLabel="Room Type"
                                     priceLabel="Cost"
+                                    capacityLabel="Rooms available"
+                                    showOccupancy
                                     onChange={(field, value) => updateHotelRoomType(hotelIndex, roomIndex, field, value)}
                                     onRemove={() => removeHotelRoomType(hotelIndex, roomIndex)}
                                   />
@@ -1485,13 +1509,14 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                   Enable one of the accommodation switches above if this event needs hotel or overflow room options.
                 </Alert>
               )}
+              </Stack>
             </Stack>
           )}
 
           {tabValue === 2 && (
             <Stack spacing={4}>
               <Alert severity="info">
-                Tickets and add-ons are separated here. At least one ticket type is required. Room and bed inventory is now managed in the Location tab.
+                Tickets are optional. Leave this empty for an event without booking. Tickets can be added later. Room inventory is managed in the Location tab.
               </Alert>
 
               <Stack spacing={2}>
@@ -1520,7 +1545,6 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                           id={product.id}
                           product={product}
                           nameLabel="Ticket Name"
-                          removeDisabled={ticketProducts.length === 1}
                           onChange={(field, value) => updateProducts(setTicketProducts, index, field, value)}
                           onRemove={() =>
                             setTicketProducts((current) => current.filter((_, currentIndex) => currentIndex !== index))
@@ -1532,7 +1556,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
                 </DndContext>
 
                 {ticketProducts.length === 0 && (
-                  <Alert severity="warning">Add at least one ticket type. Registration cannot open without one.</Alert>
+                  <Alert severity="info">No ticket or booking is required. You can add tickets later.</Alert>
                 )}
               </Stack>
 

@@ -65,6 +65,13 @@ vi.mock("@/lib/prisma/prisma", () => {
     product: {
       updateMany: vi.fn(),
     },
+    roomInvitation: {
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    roomGroupMember: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
   };
 
   prismaMock.$transaction.mockImplementation(async (callback: (tx: typeof prismaMock) => Promise<unknown>) => callback(prismaMock));

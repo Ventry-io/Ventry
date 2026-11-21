@@ -4,6 +4,7 @@ import PageLoadingState from "@/components/common/PageLoadingState";
 import AdminCheckInScanner from "@/components/admin/check-ins/AdminCheckInScanner";
 import { checkEventAdminAuth } from "@/lib/auth/event-admin";
 import { prisma } from "@/lib/prisma/prisma";
+import Alert from "@mui/material/Alert";
 
 export default function AdminEventCheckInPage({
   params,
@@ -30,6 +31,9 @@ async function AdminEventCheckInPageContent({
   const authResult = await checkEventAdminAuth(eventId);
   if (!authResult.authorized) {
     redirect("/login?callbackUrl=/admin/events");
+  }
+  if (authResult.canWrite === false) {
+    return <Alert severity="info">You have read-only access. Ask the organization owner for read and write access to check in attendees.</Alert>;
   }
 
   const event = await prisma.event.findUnique({

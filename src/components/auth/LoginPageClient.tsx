@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Turnstile, { turnstileEnabled } from "./Turnstile";
 import LoginForm from "@/components/auth/LoginForm";
 import { useSearchParams } from "next/navigation";
 import Alert from "@mui/material/Alert";
@@ -9,6 +10,7 @@ import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
+import { getCallbackPath } from "@/lib/auth/callback";
 import TextField from "@mui/material/TextField";
 import CircularProgress from "@mui/material/CircularProgress";
 import LastUsedIndicator from "./LastUsedIndicator";
@@ -72,10 +74,14 @@ const STATUS_MESSAGES: Record<string, { severity: "success" | "info" | "warning"
 };
 
 export default function LoginPageClient() {
+  const [captchaToken, setCaptchaToken] = React.useState("");
+  const [captchaAttempt, setCaptchaAttempt] = React.useState(0);
+  const resetCaptcha = () => { setCaptchaToken(""); setCaptchaAttempt(value => value + 1); };
+  const captchaHeaders = { "x-captcha-response": captchaToken };
   const searchParams = useSearchParams();
   const [mounted, setMounted] = React.useState(false);
 
-  const callbackUrl = searchParams.get("callbackUrl") || "/";
+  const callbackUrl = getCallbackPath(searchParams.get("callbackUrl"));
   const error = searchParams.get("error");
   const provider = searchParams.get("provider");
   const message = searchParams.get("message");
@@ -93,6 +99,7 @@ export default function LoginPageClient() {
   const [linkingError, setLinkingError] = React.useState("");
 
   React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Preserve browser query status before cleaning history after hydration.
     setMounted(true);
 
     // Read from window.location.search — useSearchParams() can return empty
@@ -129,12 +136,14 @@ export default function LoginPageClient() {
 
   const newUserCallbackURL = `/complete-profile?callbackUrl=${encodeURIComponent(callbackUrl)}`;
 
-  const handleGoogleSignIn = async () => {
-    await authClient.signIn.social({ provider: "google", callbackURL: callbackUrl, newUserCallbackURL });
-  };
-
-  const handleGitHubSignIn = async () => {
-    await authClient.signIn.social({ provider: "github", callbackURL: callbackUrl, newUserCallbackURL });
+  const handleSocialSignIn = async (provider: "google" | "github") => {
+    setLinkingError("");
+    try {
+      const result = await authClient.signIn.social({ provider, callbackURL: callbackUrl, newUserCallbackURL }, { headers: captchaHeaders });
+      if (result.error) setLinkingError(result.error.message || "Sign-in failed. Please retry.");
+    } catch {
+      setLinkingError("Connection interrupted. Please try again.");
+    } finally { resetCaptcha(); }
   };
 
   const handleLinkingLogin = async (e: React.FormEvent) => {
@@ -163,7 +172,12 @@ export default function LoginPageClient() {
         return;
       }
 
-      await authClient.signIn.social({ provider: linkProvider, callbackURL: callbackUrl });
+      const result = await authClient.signIn.social({ provider: linkProvider, callbackURL: callbackUrl }, { headers: captchaHeaders });
+      if (result.error) {
+        setLinkingError(result.error.message || "Sign-in failed. Please retry.");
+        setLinkingLoading(false);
+      }
+      resetCaptcha();
     } catch (err) {
       console.error("Linking login error:", err);
       setLinkingError("An error occurred. Please try again.");
@@ -181,6 +195,8 @@ export default function LoginPageClient() {
 
   return (
     <>
+      <Turnstile key={captchaAttempt} onChange={setCaptchaToken} />
+      {!linkRequired && linkingError && <Alert severity="error">{linkingError}</Alert>}
       {/* Single mutually-exclusive status banner */}
       {resolvedStatus && (
         <Box sx={{ mb: 2 }}>
@@ -193,6 +209,10 @@ export default function LoginPageClient() {
             <Typography variant="body2">{resolvedStatus.body}</Typography>
           </Alert>
         </Box>
+      )}
+
+      {resolvedStatus === STATUS_MESSAGES.registered && (
+        <Button href={`/check-email?callbackUrl=${encodeURIComponent(callbackUrl)}`} sx={{ mb: 2 }}>Open email confirmation</Button>
       )}
 
       {accountExists && provider && (
@@ -239,7 +259,7 @@ export default function LoginPageClient() {
                   type="submit"
                   variant="contained"
                   fullWidth
-                  disabled={linkingLoading}
+                  disabled={linkingLoading || turnstileEnabled && !captchaToken}
                   startIcon={linkingLoading ? <CircularProgress size={20} /> : null}
                 >
                   {linkingLoading
@@ -283,19 +303,19 @@ export default function LoginPageClient() {
 
       {!linkRequired && (
         <Stack spacing={3}>
-          <LoginForm callbackUrl={callbackUrl} />
+          <LoginForm callbackUrl={callbackUrl} captchaToken={captchaToken} resetCaptcha={resetCaptcha} />
           <Typography variant="subtitle2" color="text.secondary" align="center">
             Or
           </Typography>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="center">
             <LoginMethodBox>
-              <Button variant="outlined" color="secondary" onClick={() => void handleGoogleSignIn()}>
+              <Button variant="outlined" color="secondary" disabled={turnstileEnabled && !captchaToken} onClick={() => void handleSocialSignIn("google")}>
                 Sign in with Google
               </Button>
               <LastUsedIndicator loginMethod="google" />
             </LoginMethodBox>
             <LoginMethodBox>
-              <Button variant="outlined" color="secondary" onClick={() => void handleGitHubSignIn()}>
+              <Button variant="outlined" color="secondary" disabled={turnstileEnabled && !captchaToken} onClick={() => void handleSocialSignIn("github")}>
                 Sign in with GitHub
               </Button>
               <LastUsedIndicator loginMethod="github" />

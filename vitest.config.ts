@@ -15,5 +15,7 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/test-setup.ts"],
+    // MUI forms re-render slowly in jsdom (~0.7s each); under the full parallel run they exceed 5s.
+    testTimeout: 30_000,
   },
 });

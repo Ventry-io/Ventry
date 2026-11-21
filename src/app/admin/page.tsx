@@ -1,9 +1,12 @@
+import { withEventScope } from "@/lib/events/admin-context";
 import { Suspense } from "react";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
 import Skeleton from "@mui/material/Skeleton";
 import Divider from "@mui/material/Divider";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
 import {
     People,
     VerifiedUser,
@@ -14,12 +17,16 @@ import {
 } from "@mui/icons-material";
 import StatCard from "@/components/admin/StatCard/StatCard";
 import { prisma } from "@/lib/prisma/prisma";
-import { checkAdminAuth, adminEventFilter } from "@/lib/auth/admin";
+import { checkAdminAuth, adminEventFilter, getAdminFinanceAccess } from "@/lib/auth/admin";
 import { redirect } from "next/navigation";
 
-async function getDashboardStats(adminId: string, orgScope?: string) {
-    const eventFilter = await adminEventFilter(adminId, orgScope);
+async function getDashboardStats(adminId: string, eventId: string, orgScope?: string) {
+    const [baseFilter, financeAccess] = await Promise.all([
+        adminEventFilter(adminId, orgScope),
+        getAdminFinanceAccess(adminId, orgScope),
+    ]);
 
+    const eventFilter = withEventScope(baseFilter, eventId);
     const [
         totalRegistrants,
         verifiedRegistrants,
@@ -53,13 +60,13 @@ async function getDashboardStats(adminId: string, orgScope?: string) {
             where: eventFilter,
             _count: { _all: true },
         }),
-        prisma.payment.aggregate({
+        financeAccess.eventFilter ? prisma.payment.aggregate({
             _sum: { amount: true },
             where: {
                 paymentStatus: "COMPLETED",
-                registration: { event: eventFilter },
+                registration: { event: withEventScope(financeAccess.eventFilter, eventId) },
             },
-        }),
+        }) : null,
     ]);
 
     const eventCounts = Object.fromEntries(
@@ -74,7 +81,8 @@ async function getDashboardStats(adminId: string, orgScope?: string) {
         draftEvents: eventCounts.DRAFT ?? 0,
         publishedEvents: eventCounts.PUBLISHED ?? 0,
         cancelledEvents: eventCounts.CANCELLED ?? 0,
-        totalRevenue: revenue._sum.amount ?? 0,
+        totalRevenue: revenue ? revenue._sum.amount ?? 0 : null,
+        hasRestrictedFinances: financeAccess.hasRestrictedOrganizations,
     };
 }
 
@@ -86,8 +94,8 @@ function StatSkeleton() {
     );
 }
 
-async function DashboardStats({ adminId, orgScope }: { adminId: string; orgScope?: string }) {
-    const stats = await getDashboardStats(adminId, orgScope);
+async function DashboardStats({ adminId, orgScope, eventId }: { adminId: string; orgScope?: string; eventId: string }) {
+    const stats = await getDashboardStats(adminId, eventId, orgScope);
     const verifiedPct = stats.totalRegistrants
         ? Math.round((stats.verifiedRegistrants / stats.totalRegistrants) * 100)
         : 0;
@@ -149,20 +157,39 @@ async function DashboardStats({ adminId, orgScope }: { adminId: string; orgScope
                 <Typography variant="h6" fontWeight={600} color="text.secondary" sx={{ mt: 2 }}>Revenue</Typography>
                 <Divider sx={{ mt: 0.5, mb: 2 }} />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                <StatCard
-                    label="Total Revenue (completed)"
-                    value={`€ ${stats.totalRevenue.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                    Icon={AttachMoney}
-                    color="success.main"
-                    sub="See Billing for full breakdown"
-                />
-            </Grid>
+            {stats.totalRevenue === null ? (
+                <Grid size={12}>
+                    <Alert severity="info">
+                        <AlertTitle>Finance access required</AlertTitle>
+                        You don’t have access to this organization’s finances. Ask the organization owner to grant you the Finances permission.
+                    </Alert>
+                </Grid>
+            ) : (
+                <>
+                    {stats.hasRestrictedFinances && (
+                        <Grid size={12}>
+                            <Alert severity="info">
+                                Some organization finances are hidden because you don’t have the Finances permission.
+                                Revenue below includes only events whose finances you can access. Ask the organization owner for access.
+                            </Alert>
+                        </Grid>
+                    )}
+                    <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+                        <StatCard
+                            label="Total Revenue (completed)"
+                            value={`€ ${stats.totalRevenue.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                            Icon={AttachMoney}
+                            color="success.main"
+                            sub="See Billing for full breakdown"
+                        />
+                    </Grid>
+                </>
+            )}
         </>
     );
 }
 
-type Props = { searchParams: Promise<{ orgFilter?: string }> };
+type Props = { searchParams: Promise<{ orgFilter?: string; eventId?: string }> };
 
 export default async function AdminDashboardPage({ searchParams }: Props) {
     const auth = await checkAdminAuth();
@@ -176,7 +203,8 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
         );
     }
 
-    const { orgFilter } = await searchParams;
+    const { orgFilter, eventId } = await searchParams;
+    if (!eventId) redirect("/admin/events");
 
     return (
         <Box>
@@ -190,7 +218,7 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
                         <StatSkeleton key={i} />
                     ))}
                 >
-                    <DashboardStats adminId={auth.adminId} orgScope={orgFilter} />
+                    <DashboardStats key={eventId} eventId={eventId} adminId={auth.adminId} orgScope={orgFilter} />
                 </Suspense>
             </Grid>
         </Box>

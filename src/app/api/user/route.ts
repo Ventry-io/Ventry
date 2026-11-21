@@ -1,3 +1,4 @@
+import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { type NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma/prisma";
 import { getSession } from "@/lib/auth/session";
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest) {
         pronouns: true,
         showAge: true,
         showExactBirthdate: true,
+        showConventions: true,
         socialLinks: true,
         createdAt: true,
         updatedAt: true,
@@ -100,6 +102,9 @@ export async function GET(req: NextRequest) {
 // POST: Create a new user
 export async function POST(req: NextRequest) {
   try {
+    if (!await verifyTurnstile(req.headers)) {
+      return NextResponse.json({ error: "Security check failed or expired. Please retry." }, { status: 403 });
+    }
     if (!req.headers.get("content-type")?.includes("application/json")) {
       return NextResponse.json({ error: "Invalid content type" }, { status: 400 });
     }
@@ -224,6 +229,10 @@ export async function PATCH(req: NextRequest) {
 
     const { id: _, ...updateData } = body;
 
+    if ("email" in updateData) {
+      return NextResponse.json({ error: "Use the verified email change flow to update your email address" }, { status: 400 });
+    }
+
     const parsed = userSchema.safeParse(updateData);
     if (!parsed.success) {
       return NextResponse.json({ error: z.treeifyError(parsed.error) }, { status: 400 });
@@ -296,6 +305,7 @@ export async function PATCH(req: NextRequest) {
         profilePictures: true,
         showAge: true,
         showExactBirthdate: true,
+        showConventions: true,
         socialLinks: true,
         createdAt: true,
         updatedAt: true,

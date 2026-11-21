@@ -7,6 +7,7 @@ import RegistrationUpdateMail from "@/components/emails/RegistrationUpdateMail";
 import { sendMail } from "@/lib/mail";
 import { cancelRegistrationAndReleaseCapacity, syncReleasedProductStocks } from "@/lib/events/registration-capacity";
 import { createNotification } from "@/lib/notifications";
+import { type RoomNotice, sendNotices } from "@/lib/rooms/common";
 
 type FinanceAction = "NONE" | "UPCHARGE_REQUIRED" | "MANUAL_REFUND_RECOMMENDED";
 
@@ -97,6 +98,15 @@ export async function PATCH(
         });
         if (!accessible) return forbiddenResponse("No access to this registration");
 
+        const writeAuth = await checkEventAdminAuth(current.eventId, undefined, req.headers, true);
+        if (!writeAuth.authorized) return forbiddenResponse(writeAuth.error);
+
+        if ((paymentStatus !== undefined && paymentStatus !== current.payments[0]?.paymentStatus) ||
+            (paymentAmount !== undefined && Number(paymentAmount) !== Number(current.payments[0]?.amount))) {
+          const financeAuth = await checkEventAdminAuth(current.eventId, "STRIPE_FINANCES", req.headers, true);
+          if (!financeAuth.authorized) return forbiddenResponse(financeAuth.error);
+        }
+
         // Org-member access to approval status changes requires EVENT_APPROVAL permission
         if (status === "APPROVED") {
           const approvalAuth = await checkEventAdminAuth(current.eventId, "EVENT_APPROVAL", req.headers);
@@ -152,6 +162,7 @@ export async function PATCH(
         }
 
         // 2. Perform update in a transaction
+        const roomNotices: RoomNotice[] = [];
         const registration = await prisma.$transaction(async (tx) => {
             // Find admin profile for current user
             const adminUserId = authResult.user?.id;
@@ -180,7 +191,7 @@ export async function PATCH(
             let releasedProductIds: string[] = [];
 
             if (isCancellingRegistration) {
-                releasedProductIds = await cancelRegistrationAndReleaseCapacity(tx, id);
+                releasedProductIds = await cancelRegistrationAndReleaseCapacity(tx, id, roomNotices);
             } else {
                 if (requestedTicketId && requestedTicketId !== currentTicketItem?.productId) {
                     const nextTicketProduct = current.event.products.find((product) => product.id === requestedTicketId);
@@ -405,7 +416,7 @@ export async function PATCH(
             };
         });
 
-        await syncReleasedProductStocks(registration.releasedProductIds);
+        await Promise.all([syncReleasedProductStocks(registration.releasedProductIds), sendNotices(roomNotices)]);
 
         // 3. Send notification email with diff
         if (changes.length > 0) {

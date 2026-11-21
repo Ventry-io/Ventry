@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { forbiddenResponse } from "@/lib/auth/admin";
 import { checkEventAdminAuth } from "@/lib/auth/event-admin";
+import { deleteEventMedia } from "@/lib/supabase";
 import { adminUpdateEventSchema } from "@/types/schemas/event/admin";
 import { z } from "zod";
 
@@ -51,7 +52,7 @@ export async function PATCH(
         const id = Number((await params).id);
         if (Number.isNaN(id)) return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
-        const authResult = await checkEventAdminAuth(id);
+        const authResult = await checkEventAdminAuth(id, req.headers, undefined, true);
         if (!authResult.authorized) {
             return forbiddenResponse(authResult.error);
         }
@@ -60,6 +61,15 @@ export async function PATCH(
         const validatedData = adminUpdateEventSchema.parse(body);
 
         const { location, products, ...scalarFields } = validatedData;
+
+        if (products) {
+            const removedBookings = await prisma.product.findMany({
+                where: { eventId: id, id: { notIn: products.flatMap(product => product.id ? [product.id] : []) },
+                    OR: [{ registrationItems: { some: {} } }, { waitlistEntries: { some: {} } }] },
+                select: { id: true },
+            });
+            if (removedBookings.length) return NextResponse.json({ error: "Booked or waitlisted products cannot be removed" }, { status: 409 });
+        }
 
         const event = await prisma.event.update({
             where: { id },
@@ -77,19 +87,13 @@ export async function PATCH(
                         }
                     }
                 }),
-                // Handle products update - strategy: replace all for simplicity if provided
-                // This can be refined later if needed
                 ...(products && {
                     products: {
-                        deleteMany: {},
-                        create: products.map(p => ({
-                            id: p.id,
-                            name: p.name,
-                            description: p.description,
-                            price: p.price,
-                            type: p.type as "TICKET" | "ACCOMMODATION" | "ADDON",
-                            capacity: p.capacity
-                        }))
+                        deleteMany: { id: { notIn: products.flatMap(product => product.id ? [product.id] : []) } },
+                        upsert: products.map(p => {
+                            const data = { name: p.name, description: p.description, price: p.price, type: p.type, capacity: p.capacity, order: p.order, minOccupants: p.minOccupants, maxOccupants: p.maxOccupants };
+                            return { where: { id: p.id || "" }, create: { ...data, ...(p.id ? { id: p.id } : {}) }, update: data };
+                        })
                     }
                 })
             },
@@ -107,6 +111,9 @@ export async function PATCH(
         if (error instanceof z.ZodError) {
             return NextResponse.json({ error: error.issues }, { status: 422 });
         }
+        if (typeof error === "object" && error && "code" in error && error.code === "P2003") {
+            return NextResponse.json({ error: "Booked or waitlisted products cannot be removed" }, { status: 409 });
+        }
         console.error("Error updating event:", error);
         return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
     }
@@ -114,14 +121,14 @@ export async function PATCH(
 
 // DELETE /api/admin/event/[id] - Delete an event
 export async function DELETE(
-    _req: NextRequest,
+    req: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const id = Number((await params).id);
         if (Number.isNaN(id)) return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
-        const authResult = await checkEventAdminAuth(id);
+        const authResult = await checkEventAdminAuth(id, req.headers, undefined, true);
         if (!authResult.authorized) {
             return forbiddenResponse(authResult.error);
         }
@@ -137,9 +144,12 @@ export async function DELETE(
             }, { status: 409 });
         }
 
-        await prisma.event.delete({
+        const deleted = await prisma.event.delete({
             where: { id }
         });
+
+        // The event is gone either way; a storage hiccup only leaves files behind, so it is logged, not returned.
+        await deleteEventMedia(id, deleted.imageUrl).catch(error => console.error(`Could not remove media of deleted event ${id}:`, error));
 
         return NextResponse.json({ message: "Event deleted successfully" }, { status: 200 });
     } catch (error) {

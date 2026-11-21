@@ -4,6 +4,8 @@ import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
 import Skeleton from "@mui/material/Skeleton";
 import Divider from "@mui/material/Divider";
+import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
 import { AttachMoney, TrendingUp, Cancel, HourglassEmpty } from "@mui/icons-material";
 import StatCard from "@/components/admin/StatCard/StatCard";
 import { checkAdminAuth } from "@/lib/auth/admin";
@@ -14,8 +16,18 @@ import RecentPaymentsTable from "./RecentPaymentsTable";
 const fmt = (amount: number) =>
     `€\u202f${amount.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-async function BillingContent({ adminId, orgScope }: { adminId: string; orgScope?: string }) {
-    const data = await getBillingData(adminId, orgScope);
+async function BillingContent({ adminId, orgScope, eventId }: { adminId: string; orgScope?: string; eventId: string }) {
+    const data = await getBillingData(adminId, orgScope, eventId);
+    if (!data) {
+        return (
+            <Grid size={12}>
+                <Alert severity="info">
+                    <AlertTitle>Finance access required</AlertTitle>
+                    You don’t have access to this organization’s finances. Ask the organization owner to grant you the Finances permission.
+                </Alert>
+            </Grid>
+        );
+    }
     const paymentRows = data.recentPayments.map((p) => ({
         id: p.id,
         createdAt: p.createdAt,
@@ -30,6 +42,14 @@ async function BillingContent({ adminId, orgScope }: { adminId: string; orgScope
 
     return (
         <>
+            {data.hasRestrictedOrganizations && (
+                <Grid size={12}>
+                    <Alert severity="info">
+                        Some organization finances are hidden because you don’t have the Finances permission.
+                        Totals below include only events whose finances you can access. Ask the organization owner for access.
+                    </Alert>
+                </Grid>
+            )}
             {/* Summary cards */}
             <Grid size={12}>
                 <Typography variant="h6" fontWeight={600} color="text.secondary">Overview</Typography>
@@ -113,14 +133,15 @@ async function BillingContent({ adminId, orgScope }: { adminId: string; orgScope
     );
 }
 
-type Props = { searchParams: Promise<{ orgFilter?: string }> };
+type Props = { searchParams: Promise<{ orgFilter?: string; eventId?: string }> };
 
 export default async function AdminBillingPage({ searchParams }: Props) {
     const auth = await checkAdminAuth();
     if (!auth.authorized) redirect("/login");
     if (!auth.adminId) redirect("/unauthorized");
 
-    const { orgFilter } = await searchParams;
+    const { orgFilter, eventId } = await searchParams;
+    if (!eventId) redirect("/admin/events");
 
     return (
         <Box>
@@ -136,7 +157,7 @@ export default async function AdminBillingPage({ searchParams }: Props) {
                         </Grid>
                     ))}
                 >
-                    <BillingContent adminId={auth.adminId} orgScope={orgFilter} />
+                    <BillingContent key={eventId} eventId={eventId} adminId={auth.adminId} orgScope={orgFilter} />
                 </Suspense>
             </Grid>
         </Box>

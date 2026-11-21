@@ -70,6 +70,25 @@ const VALID_REGISTRATION = {
 };
 
 describe("App Router: /api/user PATCH", () => {
+  it.each([true, false])("persists convention visibility %s", async (showConventions) => {
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1" } });
+    prismaMock.user.findUnique.mockResolvedValue({ id: "user-1", accounts: [] });
+    prismaMock.user.update.mockResolvedValue({ id: "user-1", showConventions });
+    const response = await userRoute.PATCH(patchRequest({ id: "user-1", showConventions }));
+    expect(response.status).toBe(200);
+    expect(prismaMock.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { showConventions }, select: expect.objectContaining({ showConventions: true }),
+    }));
+    await expect(response.json()).resolves.toMatchObject({ showConventions });
+  });
+
+  it("rejects non-boolean convention visibility", async () => {
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1" } });
+    const response = await userRoute.PATCH(patchRequest({ id: "user-1", showConventions: "true" }));
+    expect(response.status).toBe(400);
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -144,6 +163,13 @@ describe("App Router: /api/user PATCH", () => {
         }),
       }),
     );
+  });
+
+  it("rejects email updates that bypass verification", async () => {
+    mockedGetSession.mockResolvedValue({ user: { id: "user-1" } });
+    const response = await userRoute.PATCH(patchRequest({ id: "user-1", email: "new@example.com" }));
+    expect(response.status).toBe(400);
+    expect(prismaMock.user.update).not.toHaveBeenCalled();
   });
 
   it("normalizes country fields to ISO country codes", async () => {
@@ -527,5 +553,19 @@ describe("App Router: /api/user DELETE", () => {
 
     expect(response.status).toBe(200);
     expect(prismaMock.user.delete).toHaveBeenCalledWith({ where: { id: "user-1" } });
+  });
+});
+
+describe("Turnstile on legacy account creation", () => {
+  it("rejects direct user creation and admin bootstrap without a token", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TURNSTILE_SITE_KEY", "site-key");
+    vi.stubEnv("TURNSTILE_SECRET_KEY", "secret-key");
+    try {
+      const response = await userRoute.POST(postRequest({}));
+      expect(response.status).toBe(403);
+      expect(prismaMock.user.create).not.toHaveBeenCalled();
+      const bootstrap = await import("@/app/api/admin/auth/register/route");
+      expect((await bootstrap.POST(postRequest({}))).status).toBe(403);
+    } finally { vi.unstubAllEnvs(); }
   });
 });

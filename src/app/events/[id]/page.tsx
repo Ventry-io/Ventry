@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma/prisma";
 import { notFound } from "next/navigation";
-import { getSession } from "@/lib/auth/session";
+import { canEditEvent, getEventViewer, visibleEventWhere } from "@/lib/events/public-event";
 import { calculateMaximumStaySurcharge, normalizeStayPolicy, resolveAccommodationHotels } from "@/lib/events/accommodation";
 import {
   Container,
@@ -15,13 +15,20 @@ import {
   Alert
 } from "@mui/material";
 import { 
-  CalendarMonth, 
-  LocationOn, 
   AccessTime, 
   ConfirmationNumber,
-  Edit
+  Edit,
+  Hotel,
+  Palette
 } from "@mui/icons-material";
-import Image from "next/image";
+import EventPageContent from "@/components/events/EventPageContent";
+import { EventSiteFrame, EventSiteHeader, EventSiteStyles, pageBackgroundSx } from "@/components/events/site/EventSiteFrame";
+import EventSiteNav from "@/components/events/site/EventSiteNav";
+import type { SiteContext } from "@/components/events/site/PageBlocks";
+import { loadTelegramFeeds } from "@/lib/events/telegram";
+import { buildSiteCss, storageHost } from "@/lib/events/page-css";
+import { normalizeEventPage } from "@/types/schemas/event/page";
+import { ticketPriceLabel } from "@/lib/events/pricing";
 import EventRegistrationStatus from "@/components/events/EventRegistrationStatus";
 import RegistrationCountdown from "@/components/events/RegistrationCountdown";
 import EventSchedule from "@/components/events/EventSchedule";
@@ -31,6 +38,7 @@ import CommunitySection from "@/components/events/community/CommunitySection";
 import type { SerializedEvent, SerializedProduct } from "@/types/event";
 import { Suspense } from "react";
 import PageLoadingState from "@/components/common/PageLoadingState";
+import { hasCheckInIdentity, hasBillingAddress } from "@/lib/user/profile-completion";
 import { AttendeeCard } from "./AttendeeCard";
 
 const eventDateFormatter = new Intl.DateTimeFormat("en-US");
@@ -60,23 +68,10 @@ async function EventDetailPageContent({
   if (Number.isNaN(id)) notFound();
 
   const { message } = await searchParams;
-  const session = await getSession();
-
+  const viewer = await getEventViewer();
+  const { session, user: bookingIdentity } = viewer;
   const event = await prisma.event.findFirst({
-    where: { 
-      id,
-      OR: [
-        { status: 'PUBLISHED' },
-        { 
-          status: 'DRAFT',
-          publishAt: { lte: new Date() } // Auto-publish check
-        },
-        // Allow admins to view drafts
-        ...(session?.user?.id ? [{ 
-          ownerId: session.user.id
-        }] : [])
-      ]
-    },
+    where: visibleEventWhere(id, viewer),
     include: {
       location: true,
       products: {
@@ -97,28 +92,7 @@ async function EventDetailPageContent({
 
   if (!event) notFound();
 
-  // Check if user owns or has org access to this event
-  let canEdit = false;
-  if (session?.user?.id) {
-    const dbUser = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: {
-        isAdmin: true,
-        adminProfile: {
-          select: {
-            id: true,
-            organizationMemberships: { select: { organizationId: true } },
-          },
-        },
-      },
-    });
-    const adminId = dbUser?.adminProfile?.id;
-    const orgIds = dbUser?.adminProfile?.organizationMemberships.map((m) => m.organizationId) ?? [];
-    canEdit =
-      !!adminId &&
-      (event.ownerId === adminId ||
-        (event.organizationId != null && orgIds.includes(event.organizationId)));
-  }
+  const canEdit = canEditEvent(event, viewer);
 
   // If it was a scheduled draft, update its status to PUBLISHED proactively
   if (event.status === 'DRAFT' && event.publishAt && new Date(event.publishAt) <= new Date()) {
@@ -140,18 +114,28 @@ async function EventDetailPageContent({
       payments: {
         orderBy: { createdAt: 'desc' },
         take: 1
-      }
+      },
+      registrationItems: { select: { product: { select: { type: true } } } }
     }
   }) : null;
 
   const canOpenSupportTicket = !!registration && registration.status !== "CANCELLED";
+  const hasHotelRoom = canOpenSupportTicket && !!registration?.registrationItems.some((item) => item.product.type === "ACCOMMODATION");
 
   // Add expiresAt to the cast/serialization if needed, 
   // but Prisma already includes it in the object since we updated the schema.
   // I'll make sure the props passed to EventRegistrationStatus are correct.
 
+  const pageDesign = normalizeEventPage(event.pageDesign);
+  const { theme } = pageDesign;
+  const home = pageDesign.pages[0];
+  const siteCss = buildSiteCss(theme, storageHost()).css;
+  const siteCtx: SiteContext = { eventId: event.id, homeSlug: home.slug, telegramSource: "public", telegram: await loadTelegramFeeds(home.blocks) };
+  const priceLabel = ticketPriceLabel(event.products);
+  const hasTickets = event.products.some(product => product.type === "TICKET");
   const startDate = new Date(event.startDate);
   const endDate = new Date(event.endDate);
+  // eslint-disable-next-line react-hooks/purity -- Request-time calculation in an async server component.
   const eventEnded = endDate.getTime() < Date.now();
   const serializedProducts = event.products.map(p => ({
     id: p.id,
@@ -247,7 +231,8 @@ async function EventDetailPageContent({
   };
 
   return (
-    <Box>
+    <Box sx={pageBackgroundSx(theme)}>
+      <EventSiteStyles css={siteCss} />
       {/* Success Alert */}
       {message === 'update_success' && (
         <Container maxWidth="lg" sx={{ mt: 2 }}>
@@ -265,93 +250,44 @@ async function EventDetailPageContent({
         </Container>
       )}
 
-      {/* Hero Banner */}
-      <Box sx={{ position: 'relative', height: { xs: 300, md: 500 }, width: '100%', bgcolor: 'grey.900' }}>
-        {event.imageUrl ? (
-          <Image
-            src={event.imageUrl}
-            alt={event.name}
-            fill
-            sizes="100vw"
-            preload
-            loading="eager"
-            style={{ objectFit: 'cover', opacity: 0.7 }}
-          />
-        ) : (
-          <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography variant="h2" color="grey.700">Ventry</Typography>
-          </Box>
-        )}
-        <Box 
-          sx={{ 
-            position: 'absolute', 
-            bottom: 0, 
-            left: 0, 
-            width: '100%', 
-            p: { xs: 4, md: 8 },
-            background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%)',
-            color: 'white'
-          }}
-        >
-          <Container maxWidth="lg">
-            <Typography variant="h2" component="h1" fontWeight="bold" gutterBottom>
-              {event.name}
-            </Typography>
-            <Stack direction="row" spacing={3}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CalendarMonth />
-                <Typography variant="h6">
-                  {eventDateFormatter.format(startDate)} - {eventDateFormatter.format(endDate)}
-                </Typography>
-              </Box>
-              {event.location && (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <LocationOn />
-                  <Typography variant="h6">
-                    {event.location.city}, {event.location.country}
-                  </Typography>
-                </Box>
-              )}
-            </Stack>
-          </Container>
-        </Box>
-      </Box>
+      <EventSiteFrame theme={theme}>
+        <EventSiteHeader theme={theme} name={event.name} imageUrl={event.imageUrl}>
+          <Stack direction="row" flexWrap="wrap" gap={2}>
+            <Typography>{eventDateFormatter.format(startDate)} – {eventDateFormatter.format(endDate)}</Typography>
+            {event.location && <Typography>{event.location.city}, {event.location.country}</Typography>}
+          </Stack>
+        </EventSiteHeader>
+        <EventSiteNav nav={pageDesign.nav} ctx={siteCtx} currentHref={`/events/${event.id}`} />
+      </EventSiteFrame>
 
       {/* Content */}
       <Container maxWidth="lg" sx={{ py: 6 }}>
         <Grid container spacing={6}>
           {/* Main Info */}
           <Grid size={{ xs: 12, md: 8 }}>
-            <Box mb={6}>
+            <EventSiteFrame theme={theme} sx={{ p: { xs: 0, md: 1 } }}>
+            <EventPageContent blocks={home.blocks} ctx={siteCtx} slots={{
+              about: <Box>
               <Typography variant="h4" gutterBottom fontWeight="bold">About this Event</Typography>
               <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary', fontSize: '1.1rem' }}>
                 {event.description}
               </Typography>
-            </Box>
-
-            {/* Schedule */}
-            {serializedEvent.schedule && serializedEvent.schedule.length > 0 && (
-              <Box mb={6}>
-                <EventSchedule schedule={serializedEvent.schedule} />
-              </Box>
-            )}
-
-            {event.location && (
-              <Box mb={6}>
+            </Box>,
+              location: event.location && (
+              <Box>
                 <Typography variant="h4" gutterBottom fontWeight="bold">Location</Typography>
                 <Paper variant="outlined" sx={{ p: 3 }}>
                   <Typography variant="h6" gutterBottom>{event.location.name}</Typography>
-                  <Typography color="text.secondary">{event.location.address}</Typography>
-                  <Typography color="text.secondary">
+                  <Typography>{event.location.address}</Typography>
+                  <Typography>
                     {event.location.postalCode} {event.location.city}
                   </Typography>
-                  <Typography color="text.secondary">{event.location.state}, {event.location.country}</Typography>
+                  <Typography>{[event.location.state, event.location.country].filter(Boolean).join(", ")}</Typography>
                   <EventLocationMap location={event.location} />
                 </Paper>
               </Box>
-            )}
-
-            <Box mb={6}>
+            ),
+              attendees: <Box>
               <Typography variant="h4" gutterBottom fontWeight="bold">Attendees</Typography>
               <Paper variant="outlined" sx={{ p: 3 }}>
                 {attendees.length === 0 ? (
@@ -366,9 +302,14 @@ async function EventDetailPageContent({
                   </Grid>
                 )}
               </Paper>
-            </Box>
-
-            {event.communityEnabled && (
+            </Box>,
+            }}
+              schedule={serializedEvent.schedule && serializedEvent.schedule.length > 0 && (
+              <Box mb={6}>
+                <EventSchedule schedule={serializedEvent.schedule} />
+              </Box>
+            )}
+              community={event.communityEnabled && (
               <Box mb={6}>
                 <CommunitySection
                   eventId={event.id}
@@ -379,6 +320,8 @@ async function EventDetailPageContent({
                 />
               </Box>
             )}
+            />
+            </EventSiteFrame>
           </Grid>
 
           {/* Registration Sidebar */}
@@ -403,25 +346,16 @@ async function EventDetailPageContent({
                     <Box>
                       <Typography variant="subtitle2">Price Range</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {event.products.length > 0 
-                          ? (
-                            <>
-                              {`${Math.min(...event.products.map(p => p.price))}€ - ${Math.max(...event.products.map(p => p.price))}€`}
-                              {maximumStaySurcharge > 0 && (
-                                <Typography component="span" variant="caption" display="block" color="primary.main" sx={{ mt: 0.5 }}>
-                                  + Optional Hotel Extras (up to {maximumStaySurcharge}€)
-                                </Typography>
-                              )}
-                            </>
-                          )
-                          : 'Free / TBD'
-                        }
+                        {priceLabel || 'No ticket prices listed'}
+                        {maximumStaySurcharge > 0 && <Typography component="span" variant="caption" display="block">+ Optional Hotel Extras (up to {maximumStaySurcharge}€)</Typography>}
                       </Typography>
                     </Box>
                   </Box>
                 </Stack>
 
-                {registration ? (
+                {!hasTickets ? (
+                  <Alert severity="info">No ticket or booking is required for this event.</Alert>
+                ) : registration ? (
                   <EventRegistrationStatus 
                     registration={{
                       ...registration,
@@ -431,6 +365,14 @@ async function EventDetailPageContent({
                   />
                 ) : (
                   <>
+                    {(!bookingIdentity || !hasCheckInIdentity(bookingIdentity) || !hasBillingAddress(bookingIdentity)) && (
+                      <Alert severity="info" sx={{ mb: 2 }}>
+                        Booking requires your legal name and billing address. Add them before ticket sales open to avoid delays. Preparing your details does not reserve a ticket.
+                        <Button fullWidth size="small" sx={{ mt: 1 }} href={`/complete-profile?intent=billing&callbackUrl=${encodeURIComponent(`/events/${event.id}`)}`}>
+                          Prepare booking details
+                        </Button>
+                      </Alert>
+                    )}
                     <Button 
                       fullWidth 
                       variant="contained" 
@@ -476,6 +418,18 @@ async function EventDetailPageContent({
                     Edit Event (Admin)
                   </Button>
                 )}
+                {canEdit && (
+                  <Button
+                    fullWidth
+                    variant="outlined"
+                    color="secondary"
+                    startIcon={<Palette />}
+                    href={`/admin/events/${event.id}/page-designer`}
+                    sx={{ mt: 1 }}
+                  >
+                    Design this page
+                  </Button>
+                )}
 
                 {event.maxRegistrations && (
                   <Box sx={{ mt: 2, textAlign: 'center' }}>
@@ -486,6 +440,12 @@ async function EventDetailPageContent({
                 )}
               </Paper>
 
+              {hasHotelRoom && (
+                <Button variant="outlined" href={`/events/${event.id}/room`} startIcon={<Hotel />}>
+                  Hotel room &amp; roommates
+                </Button>
+              )}
+
               {canOpenSupportTicket && registration && (
                 <SupportTicketPanel
                   eventId={event.id}
@@ -493,17 +453,17 @@ async function EventDetailPageContent({
                 />
               )}
 
-              <Box sx={{ px: 2 }}>
+              {hasTickets && <Paper variant="outlined" sx={{ p: 2 }}>
                 <Typography variant="h6" gutterBottom>Includes</Typography>
                 <Stack direction="row" flexWrap="wrap" gap={1}>
                   <Chip label="Badge" variant="outlined" />
-                  <Chip label="Convention Access" variant="outlined" />
+                  <Chip label="Event Access" variant="outlined" />
                   <Chip label="Workshops" variant="outlined" />
                   {accommodationHotels.length > 0 && (
                     <Chip label="Hotel Support" variant="outlined" />
                   )}
                 </Stack>
-              </Box>
+              </Paper>}
             </Stack>
           </Grid>
         </Grid>

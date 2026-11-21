@@ -15,6 +15,8 @@ export interface SerializedProduct {
   type?: 'TICKET' | 'ACCOMMODATION' | 'ADDON';
   capacity?: number | null;
   soldCount?: number;
+  minOccupants?: number;
+  maxOccupants?: number;
 }
 
 export type SerializedStayFeeMode = 'AUTO' | 'CUSTOM';
@@ -78,6 +80,7 @@ export interface SerializedEvent {
   communityAttendeesOnly?: boolean;
   stayPolicy: SerializedStayPolicy;
   schedule: SerializedScheduleItem[];
+  pageDesign?: unknown;
   location?: SerializedLocation | null;
   products: SerializedProduct[];
   _count?: {

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { type EventEntitySchema, EventIdSchema, LocationSchema, type StayPolicy, EventBaseObject, checkDateOrder } from "./base";
+import { type EventEntitySchema, EventIdSchema, LocationSchema, type StayPolicy, EventBaseObject, checkDateOrder, checkOccupancyLimits } from "./base";
+import { StayPolicySchema } from "./accommodation";
 
 
 /**
@@ -17,7 +18,11 @@ const AdminOnlySchema = z.object({
  * @body EventBase + AdminOnly (without id/createdAt/updatedAt)
  * @who server-side, to create a new event
  */
-const adminCreateEventSchema = EventBaseObject.extend(AdminOnlySchema.shape).superRefine(checkDateOrder).strict();
+const adminCreateEventSchema = EventBaseObject.extend({
+    ...AdminOnlySchema.shape,
+    // Apply the empty accommodation default only on creation; PATCH must retain existing hotel data.
+    stayPolicy: StayPolicySchema.prefault({}),
+}).superRefine(checkDateOrder).superRefine(checkOccupancyLimits).strict();
 type AdminCreateEventInput = z.input<typeof adminCreateEventSchema>;
 
 
@@ -48,7 +53,7 @@ type AdminGetEventInput = z.infer<typeof adminGetEventSchema>;
 const adminUpdateEventSchema = EventBaseObject.partial().extend({
     ...AdminOnlySchema.shape,
     status: z.enum(["DRAFT", "PUBLISHED", "CANCELLED"]).optional(),
-}).superRefine(checkDateOrder).strict();
+}).superRefine(checkDateOrder).superRefine(checkOccupancyLimits).strict();
 type AdminUpdateEventInput = z.input<typeof adminUpdateEventSchema>;
 
 

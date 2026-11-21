@@ -30,6 +30,7 @@ model User {
   pronouns             String?
   showAge              Boolean              @default(true)
   showExactBirthdate   Boolean              @default(false)
+  showConventions      Boolean              @default(false)
   socialLinks          Json                 @default("{}")
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
@@ -115,6 +116,8 @@ model AdminOrganization {
   members     AdminOrganizationMembership[]
   events      Event[]                       @relation("OrgEvents")
   invitations AdminInvitation[]
+  departments CrewDepartment[]
+  crewResources Json @default("[]")
 }
 
 model AdminOrganizationMembership {
@@ -122,6 +125,10 @@ model AdminOrganizationMembership {
   adminId        String
   organizationId String
   permissions    AdminOrgPermission[]
+  accessLevel    CrewAccessLevel @default(WRITE)
+  departmentId   String?
+  role           String?
+  department     CrewDepartment? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   joinedAt       DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   admin          Admin                @relation(fields: [adminId], references: [id], onDelete: Cascade)
@@ -138,6 +145,10 @@ model AdminInvitation {
   invitedAdminId   String?
   invitedByAdminId String
   permissions      AdminOrgPermission[]
+  accessLevel      CrewAccessLevel @default(WRITE)
+  departmentId     String?
+  role             String?
+  department       CrewDepartment? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   status           AdminInvitationStatus @default(PENDING)
   token            String                @unique @default(cuid())
   expiresAt        DateTime
@@ -216,6 +227,9 @@ model Event {
   registrationOpensAt DateTime?
   paymentDeadline     DateTime?
   schedule            Json            @default("[]")
+  pageDesign          Json            @default("{}")
+  pageDesignDraft     Json?
+  pageDesignPublishedAt DateTime?
   requiresHotel       Boolean         @default(false)
   requireApproval     Boolean         @default(false)
   scanOnce            Boolean         @default(false)
@@ -226,6 +240,8 @@ model Event {
   communityModerateComments Boolean   @default(false)
   communityAttendeesOnly Boolean      @default(true)
   lastDigestSentAt    DateTime?
+  /// After this moment attendees can no longer invite, accept or leave room groups.
+  roomGroupCutoffAt   DateTime?
   badgeTemplates      BadgeTemplate[]
   owner               Admin?          @relation(fields: [ownerId], references: [id])
   organization        AdminOrganization? @relation("OrgEvents", fields: [organizationId], references: [id])
@@ -235,6 +251,9 @@ model Event {
   registrations       Registration[]
   supportTickets      SupportTicket[]
   communityPosts      CommunityPost[]
+  hotelRooms          HotelRoom[]
+  roomGroups          RoomGroup[]
+  roomAuditLogs       RoomAuditLog[]
 }
 
 model CommunityPost {
@@ -373,6 +392,9 @@ model Registration {
   registrationItems RegistrationItem[]
   supportTickets    SupportTicket[]
   waitlistEntries   WaitlistEntry[]
+  roomGroupMember   RoomGroupMember?
+  roomInvitationsSent     RoomInvitation[] @relation("RoomInvitationsSent")
+  roomInvitationsReceived RoomInvitation[] @relation("RoomInvitationsReceived")
 
   @@unique([userId, eventId])
   @@index([eventId, ticketId])
@@ -385,7 +407,7 @@ model RegistrationItem {
   productId      String
   priceAtBooking Float
   createdAt      DateTime     @default(now())
-  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
   registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
 
   @@index([registrationId])
@@ -473,6 +495,9 @@ model Product {
   type              ProductType        @default(TICKET)
   allowWaitlist     Boolean            @default(true)
   order             Int                @default(0)
+  /// Accommodation only: beds per physical room. `capacity` counts room bookings (one booker per room); roommates join by invitation.
+  minOccupants      Int                @default(1)
+  maxOccupants      Int                @default(1)
   event             Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
   registrationItems RegistrationItem[]
   waitlistEntries   WaitlistEntry[]
@@ -483,7 +508,7 @@ model WaitlistEntry {
   registrationId String
   productId      String
   createdAt      DateTime     @default(now())
-  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
   registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
 
   @@unique([registrationId, productId])
@@ -535,11 +560,14 @@ model PendingAccountLink {
 }
 
 model TwoFactor {
-  id          String @id
-  secret      String
-  backupCodes String
-  userId      String
-  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                      String    @id
+  secret                  String
+  backupCodes             String
+  userId                  String
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime?
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("twoFactor")
 }
@@ -619,6 +647,7 @@ enum AdminOrgPermission {
   SUPPORT_TICKETS
   EVENT_APPROVAL
   STRIPE_FINANCES
+  HOTEL_MANAGEMENT
 }
 
 enum AdminInvitationStatus {
@@ -647,4 +676,132 @@ model Notification {
   createdAt DateTime         @default(now())
 
   @@index([userId, read])
+}
+
+model CrewDepartment {
+  id String @id @default(cuid())
+  organizationId String
+  name String
+  planning String @default("")
+  organization AdminOrganization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members AdminOrganizationMembership[]
+  invitations AdminInvitation[]
+  @@unique([organizationId, name])
+}
+
+enum CrewAccessLevel {
+  READ
+  WRITE
+}
+
+// ---- Hotel rooms & roommates ---------------------------------------------------------
+// productId columns are plain ids (no FK): the event editor rewrites product rows with
+// the same ids, and a cascading FK would wipe rooms and groups on every event save.
+
+/// A physical room. The number of rows per room type is the room allotment.
+model HotelRoom {
+  id             String           @id @default(cuid())
+  eventId        Int
+  /// Hotel id from Event.stayPolicy.hotels
+  hotelId        String
+  /// Room type (ACCOMMODATION product id)
+  productId      String
+  /// Room number or label given by the hotel
+  reference      String
+  /// Optional availability window (per-night availability)
+  availableFrom  DateTime?
+  availableUntil DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  event          Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  assignments    RoomAssignment[]
+
+  @@unique([eventId, reference])
+  @@index([eventId, productId])
+}
+
+model RoomGroup {
+  id          String            @id @default(cuid())
+  eventId     Int
+  /// Room type the group shares
+  productId   String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  event       Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  members     RoomGroupMember[]
+  invitations RoomInvitation[]
+  assignment  RoomAssignment?
+
+  @@index([eventId])
+}
+
+model RoomGroupMember {
+  id             String       @id @default(cuid())
+  groupId        String
+  /// Unique: a registration belongs to at most one room group
+  registrationId String       @unique
+  joinedAt       DateTime     @default(now())
+  group          RoomGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+}
+
+enum RoomInvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  REVOKED
+}
+
+model RoomInvitation {
+  id                    String               @id @default(cuid())
+  token                 String               @unique
+  groupId               String
+  inviterRegistrationId String
+  inviteeRegistrationId String
+  status                RoomInvitationStatus @default(PENDING)
+  expiresAt             DateTime
+  respondedAt           DateTime?
+  createdAt             DateTime             @default(now())
+  group                 RoomGroup            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviter               Registration         @relation("RoomInvitationsSent", fields: [inviterRegistrationId], references: [id], onDelete: Cascade)
+  invitee               Registration         @relation("RoomInvitationsReceived", fields: [inviteeRegistrationId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, status])
+  @@index([inviteeRegistrationId, status])
+}
+
+model RoomAssignment {
+  id                String    @id @default(cuid())
+  roomId            String
+  groupId           String    @unique
+  /// Nights covered: [checkIn, checkOut)
+  checkIn           DateTime
+  checkOut          DateTime
+  note              String?
+  assignedByAdminId String?
+  createdAt         DateTime  @default(now())
+  room              HotelRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  group             RoomGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
+
+/// Audit trail for room allocation and manifest exports. Ids are kept without FKs so
+/// entries survive deleted groups, rooms and admins.
+model RoomAuditLog {
+  id           String   @id @default(cuid())
+  eventId      Int
+  groupId      String?
+  actorUserId  String?
+  actorAdminId String?
+  action       String
+  note         String?
+  metadata     Json     @default("{}")
+  createdAt    DateTime @default(now())
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, createdAt])
 }

@@ -22,6 +22,9 @@ export async function POST(
       organizationId: true,
       invitedEmail: true,
       permissions: true,
+      accessLevel: true,
+      departmentId: true,
+      role: true,
       status: true,
       expiresAt: true,
     },
@@ -56,7 +59,12 @@ export async function POST(
 
   const adminId = user.adminProfile.id;
 
-  await prisma.$transaction(async tx => {
+  const accepted = await prisma.$transaction(async tx => {
+    const claimed = await tx.adminInvitation.updateMany({
+      where: { id: invitation.id, status: AdminInvitationStatus.PENDING, expiresAt: { gt: new Date() } },
+      data: { status: AdminInvitationStatus.ACCEPTED, invitedAdminId: adminId },
+    });
+    if (!claimed.count) return false;
     // Check not already a member
     const existing = await tx.adminOrganizationMembership.findUnique({
       where: { adminId_organizationId: { adminId, organizationId: orgId } },
@@ -68,15 +76,17 @@ export async function POST(
           adminId,
           organizationId: orgId,
           permissions: invitation.permissions,
+          accessLevel: invitation.accessLevel,
+          departmentId: invitation.departmentId,
+          role: invitation.role,
         },
       });
     }
 
-    await tx.adminInvitation.update({
-      where: { id: invitation.id },
-      data: { status: AdminInvitationStatus.ACCEPTED, invitedAdminId: adminId },
-    });
+    return true;
   });
+
+  if (!accepted) return NextResponse.json({ error: "Invitation is no longer pending or has expired" }, { status: 409 });
 
   return NextResponse.json({ success: true });
 }

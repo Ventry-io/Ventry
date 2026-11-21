@@ -619,7 +619,7 @@ export default function PhotoGallery({
 
   return (
     <Box>
-      <Typography variant="h6" gutterBottom sx={photoGalleryStyles.title}>
+      <Typography variant="h6" component="h2" gutterBottom sx={photoGalleryStyles.title}>
         Photo Gallery
       </Typography>
       

@@ -40,6 +40,11 @@ import {
 interface Registration {
   id: string;
   ticketId: number;
+  crewDepartment?: string | null;
+  crewRole?: string | null;
+  canWrite?: boolean;
+  canApprove?: boolean;
+  canManageFinances?: boolean;
   status: 'PENDING' | 'APPROVED' | 'CONFIRMED' | 'CANCELLED' | 'WAITLISTED';
   preferences: {
     productId?: string;
@@ -130,7 +135,7 @@ function resolveSelectedTicketId(reg: Registration) {
   return '';
 }
 
-export default function RegistrationManager() {
+export default function RegistrationManager({ eventId }: { eventId: string }) {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -155,8 +160,8 @@ export default function RegistrationManager() {
     setLoading(true);
     try {
       const url = statusFilter === 'ALL' 
-        ? '/api/admin/registrations' 
-        : `/api/admin/registrations?status=${statusFilter}`;
+        ? `/api/admin/registrations?eventId=${eventId}`
+        : `/api/admin/registrations?eventId=${eventId}&status=${statusFilter}`;
       
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch registrations');
@@ -167,7 +172,7 @@ export default function RegistrationManager() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, eventId]);
 
   const fetchEventDetails = async (eventId: number) => {
     setEventLoading(true);
@@ -373,6 +378,12 @@ export default function RegistrationManager() {
       }
     },
     {
+      field: 'crew',
+      headerName: 'Crew department / role',
+      width: 210,
+      valueGetter: (_value, row) => [row.crewDepartment, row.crewRole].filter(Boolean).join(' · ') || '—',
+    },
+    {
       field: 'selection',
       headerName: 'Selection',
       minWidth: 260,
@@ -408,7 +419,7 @@ export default function RegistrationManager() {
       width: 120,
       renderCell: (params: GridRenderCellParams) => {
         const s = params.row.status;
-        if (s === 'PENDING') {
+        if (s === 'PENDING' && params.row.canApprove !== false) {
           return (
             <IconButton color="success" onClick={() => void handleUpdateStatus(params.row.id, 'APPROVED')} title="Approve">
               <CheckCircle />
@@ -423,7 +434,7 @@ export default function RegistrationManager() {
       headerName: 'Manage',
       width: 80,
       renderCell: (params: GridRenderCellParams) => (
-        <IconButton onClick={() => void handleOpenEdit(params.row as Registration)}>
+        <IconButton aria-label="Edit registration" disabled={params.row.canWrite === false} onClick={() => void handleOpenEdit(params.row as Registration)}>
           <Edit fontSize="small" />
         </IconButton>
       )
@@ -503,6 +514,8 @@ export default function RegistrationManager() {
                 <TextField
                   select
                   fullWidth
+                  disabled={selectedReg.canManageFinances === false}
+                  helperText={selectedReg.canManageFinances === false ? 'Finances permission required to change payments.' : undefined}
                   value={selectedReg.payments[0]?.paymentStatus || 'PENDING'}
                   onChange={(e) => {
                     const newPayments = [...selectedReg.payments];

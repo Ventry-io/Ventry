@@ -1,9 +1,15 @@
 "use client";
 
 import type React from "react";
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { Box, Typography, LinearProgress } from '@mui/material';
-import zxcvbn from 'zxcvbn';
+import type { checkPasswordStrength } from '@/lib/auth/password-strength';
+
+type Check = typeof checkPasswordStrength;
+// Dictionaries are ~850 KB gzipped; keep them out of the page's initial JS.
+const loadCheck = () => import('@/lib/auth/password-strength').then((m) => m.checkPasswordStrength);
+
+const EMPTY_INPUTS: string[] = [];
 
 interface PasswordStrengthMeterProps {
   password: string;
@@ -13,23 +19,32 @@ interface PasswordStrengthMeterProps {
 
 export default function PasswordStrengthMeter({ 
   password, 
-  userInputs = [],
+  userInputs = EMPTY_INPUTS,
   setWarning
 }: PasswordStrengthMeterProps) {
-  // const [result, setResult] = useState<any>(null);
+  const [check, setCheck] = useState<Check | null>(null);
+  useEffect(() => {
+    let active = true;
+    loadCheck().then((fn) => { if (active) setCheck(() => fn); });
+    return () => { active = false; };
+  }, []);
+
   const result = useMemo(() => {
-    if(!password) return null;
-    return zxcvbn(password, userInputs);
-  }, [password, userInputs]);
+    if (!password || !check) return null;
+    return check(password, userInputs);
+  }, [password, userInputs, check]);
 
   // Update warning in useEffect to avoid state updates during render
   useEffect(() => {
-    if (result && result.score < 3) {
-      setWarning({ message: result.feedback.warning, suggestions: result.feedback.suggestions });
+    if (password && !result) {
+      // Estimator still loading: keep submit blocked without showing a message.
+      setWarning({ message: null, suggestions: [] });
+    } else if (result && result.score < 3) {
+      setWarning({ message: result.feedback.warning || "Choose a longer, less predictable password.", suggestions: result.feedback.suggestions });
     } else {
       setWarning(null);
     }
-  }, [result, setWarning]);
+  }, [password, result, setWarning]);
 
 
   if (!password || !result) {
@@ -42,21 +57,12 @@ export default function PasswordStrengthMeter({
   // Progress value (0-100)
   const normalizedScore = ((result.score + 1) / 5) * 100;
   
-  // Strength text
-  const strengthText = [
-    'Very Weak',
-    'Weak',
-    'Fair',
-    'Good',
-    'Strong'
-  ][result.score] || 'Unknown';
-
-  // Crack time (offline slow hashing)
-  const crackTime = result.crack_times_display.offline_slow_hashing_1e4_per_second;
+  const strengthText = result.strengthText;
 
   return (
     <Box sx={{ mt: 2, mb: 2 }}>
       <LinearProgress
+        aria-label="Password strength"
         variant="determinate"
         value={normalizedScore}
         sx={{
@@ -74,29 +80,13 @@ export default function PasswordStrengthMeter({
           {strengthText}
         </Typography>
         
-        {result.feedback.warning && (
+        {result.score < 3 && (
           <Typography variant="body2" color="text.secondary">
-            {result.feedback.warning}
+            {result.feedback.warning || "Use a longer, less predictable password to continue."}
           </Typography>
         )}
       </Box>
 
-      {/* Crack Time Display */}
-      <Box sx={{ mt: 2, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid #e0e0e0' }}>
-        <Typography variant="subtitle2" gutterBottom>
-          Time to crack (offline attack):
-        </Typography>
-        <Typography 
-          variant="body1" 
-          fontWeight="bold"
-          color={result.score >= 3 ? 'success.main' : result.score >= 2 ? 'warning.main' : 'error.main'}
-        >
-          {crackTime}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-          Assuming an offline attacker with 10,000 guesses per second
-        </Typography>
-      </Box>
       <PasswordFeedback suggestions={result.feedback.suggestions} />
     </Box>
   );

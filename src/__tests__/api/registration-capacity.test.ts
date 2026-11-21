@@ -29,6 +29,9 @@ interface MockDbState {
 
 vi.mock('@/lib/prisma/prisma', () => {
   const prismaMock = {
+    user: {
+      findUnique: vi.fn(),
+    },
     event: {
       findUnique: vi.fn(),
     },
@@ -60,7 +63,6 @@ vi.mock('@/lib/prisma/prisma', () => {
   };
   
   // Self-reference for transaction callback
-  // @ts-expect-error
   prismaMock.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => await callback(prismaMock));
 
   return { prisma: prismaMock };
@@ -70,6 +72,7 @@ import { prisma } from '@/lib/prisma/prisma';
 
 // Use a utility type for DeepMockProxy if available or build a compatible shape
 type MockPrismaClient = {
+  user: { findUnique: ReturnType<typeof vi.fn> };
   event: { findUnique: ReturnType<typeof vi.fn> };
   $transaction: ReturnType<typeof vi.fn>;
   registration: {
@@ -184,6 +187,13 @@ describe('Capacity Limit Integration Test', () => {
     };
 
     // Setup Prisma Mocks Behavior
+    prismaMock.user.findUnique.mockResolvedValue({
+      legalName: 'Jane Doe',
+      addressLine1: 'Main St 1',
+      addressCity: 'Berlin',
+      addressPostalCode: '10115',
+      addressCountry: 'DE',
+    });
     prismaMock.event.findUnique.mockImplementation(async () => {
       // Return fresh state every time
       return mockDb.event;

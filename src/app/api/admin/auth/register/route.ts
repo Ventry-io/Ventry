@@ -3,11 +3,14 @@
  */
 
 import prisma from "@/lib/prisma/prisma";
+import { verifyTurnstile } from "@/lib/auth/turnstile";
 import { registerSchema, type registerType } from "@/types/schemas/auth";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
-
+    if (!await verifyTurnstile(req.headers)) {
+        return NextResponse.json({ error: "Security check failed or expired. Please retry." }, { status: 403 });
+    }
 
     const adminUser = await prisma.user.findFirst({
         where: {

@@ -402,6 +402,8 @@ export default function BadgeDesigner({
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("mode", "badge-background");
+      formData.append("eventId", String(eventId));
       const response = await fetch("/api/admin/media/upload", {
         method: "POST",
         body: formData,
@@ -467,6 +469,7 @@ export default function BadgeDesigner({
       const fileName = activeFallbackPhoto.name.replace(/\.[^.]+$/, "") || "fallback-photo";
       formData.append("file", new File([croppedBlob], `${fileName}.jpg`, { type: "image/jpeg" }));
       formData.append("mode", "badge-photo");
+      formData.append("eventId", String(eventId));
       const response = await fetch("/api/admin/media/upload", {
         method: "POST",
         body: formData,
@@ -677,11 +680,13 @@ export default function BadgeDesigner({
                     <Typography variant="subtitle2">Rule {index + 1}</Typography>
                     <BadgeConditions conditions={rule.conditions} fields={conditionFields} attendee={sampleAttendee}
                       onChange={conditions => setDraftField("background", { ...draft.background, rules: conditions.length ? draft.background.rules?.map(entry => entry.id === rule.id ? { ...entry, conditions } : entry) : draft.background.rules?.filter(entry => entry.id !== rule.id) })} />
-                    <TextField size="small" label="Replacement image URL" value={rule.imageUrl || ""} helperText="Empty removes the background image."
-                      onChange={event => setDraftField("background", { ...draft.background, rules: draft.background.rules?.map(entry => entry.id === rule.id ? { ...entry, imageUrl: event.target.value || null } : entry) })} />
-                    <Button size="small" disabled={uploading || !canWrite} onClick={() => {
-                      uploadTargetRef.current = { kind: "rule", id: rule.id }; fileInputRef.current?.click();
-                    }}>Upload rule image</Button>
+                    <Typography variant="caption" color="text.secondary">{rule.imageUrl ? "Uses its own background image." : "No image: the background image is hidden for matching badges."}</Typography>
+                    <Stack direction="row" gap={1} flexWrap="wrap">
+                      <Button size="small" disabled={uploading || !canWrite} onClick={() => {
+                        uploadTargetRef.current = { kind: "rule", id: rule.id }; fileInputRef.current?.click();
+                      }}>{rule.imageUrl ? "Replace rule image" : "Upload rule image"}</Button>
+                      {rule.imageUrl && <Button size="small" onClick={() => setDraftField("background", { ...draft.background, rules: draft.background.rules?.map(entry => entry.id === rule.id ? { ...entry, imageUrl: null } : entry) })}>Remove rule image</Button>}
+                    </Stack>
                     <TextField size="small" label="Replacement color" type="color" value={rule.color || draft.background.color}
                       onChange={event => setDraftField("background", { ...draft.background, rules: draft.background.rules?.map(entry => entry.id === rule.id ? { ...entry, color: event.target.value } : entry) })} />
                     <Stack direction="row">
@@ -1040,11 +1045,10 @@ export default function BadgeDesigner({
                     </TextField>
                   ) : null}
                   {selectedElement.type === "image" ? <>
-                    <TextField label="Image URL" value={selectedElement.imageUrl || ""}
-                      onChange={event => updateElement(selectedElement.id, { imageUrl: event.target.value || undefined })} fullWidth />
                     <Button disabled={uploading || !canWrite} onClick={() => {
                       uploadTargetRef.current = { kind: "element", id: selectedElement.id }; fileInputRef.current?.click();
-                    }}>Upload layer image</Button>
+                    }}>{selectedElement.imageUrl ? "Replace layer image" : "Upload layer image"}</Button>
+                    {selectedElement.imageUrl && <Button color="error" onClick={() => updateElement(selectedElement.id, { imageUrl: undefined })}>Remove layer image</Button>}
                   </> : null}
                   <Divider />
                   <Typography variant="subtitle2">Show this layer when</Typography>

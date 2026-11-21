@@ -79,6 +79,7 @@ Required GitHub Actions secrets:
 - `DEPLOY_SSH_PRIVATE_KEY`
 - `DEV_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
 - optional: `MAIN_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- optional: `DEV_NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `MAIN_NEXT_PUBLIC_TURNSTILE_SITE_KEY` (see [Cloudflare Turnstile](#cloudflare-turnstile))
 - optional: `DEV_BETTER_AUTH_URL`
 - optional: `MAIN_BETTER_AUTH_URL`
 
@@ -99,6 +100,35 @@ OAuth prerequisites:
 - Google must include the exact redirect URI for each environment
 - GitHub must allow the exact callback URL used by each environment
 - the env file for each deployment must provide the correct `GOOGLE_*` and `GITHUB_*` credentials for that domain
+
+## Cloudflare Turnstile
+
+Login, registration, social sign-in and passkey login are protected by [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/). The server verifies the token before better-auth runs, so direct API calls cannot skip the check.
+
+| Variable | Where | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | build time (Docker build arg / GitHub secret) and `.env` | Renders the widget. It is inlined into the build. |
+| `TURNSTILE_SECRET_KEY` | server env only | Verifies tokens with Cloudflare. Never expose it to the client. |
+| `TURNSTILE_HOSTNAMES` | server env, optional | Comma-separated hostnames that a token must come from, for example `ventry.m-loeffler.de`. |
+
+- **Disabled:** leave both keys empty. This is the default for local development.
+- **Enabled:** set both keys. If only one is set, every login and registration is rejected (fail closed).
+- **Local development with Turnstile:** use Cloudflare's [test keys](https://developers.cloudflare.com/turnstile/troubleshooting/testing/). Site key `1x00000000000000000000AA` with secret `1x0000000000000000000000000000000AA` always passes, and site key `2x00000000000000000000AB` always fails. Leave `TURNSTILE_HOSTNAMES` empty, because test tokens don't report your hostname.
+- **Self-hosting:** create a widget in the Cloudflare dashboard for your domain, set `NEXT_PUBLIC_TURNSTILE_SITE_KEY` as a build arg (`docker build --build-arg NEXT_PUBLIC_TURNSTILE_SITE_KEY=...`) and in the env file, and put `TURNSTILE_SECRET_KEY` only in the server env file.
+
+## Media storage (Supabase)
+
+All media is uploaded through the app. Admins don't paste image URLs. There are two private buckets, and files are served through signed URLs.
+
+| Bucket (env) | Holds | Path |
+| --- | --- | --- |
+| `SUPABASE_BANNERS_BUCKET_ID` (default `banners`) | Event assets | `events/<eventId>/banner/`: event banner<br>`events/<eventId>/page/`: page designer images and GIF posters<br>`events/<eventId>/fonts/`: custom WOFF2 fonts<br>`events/<eventId>/badges/`: badge backgrounds and layers |
+| `SUPABASE_BUCKET_ID` | Personal data | `users/<userId>/`: profile pictures<br>`community/<eventId>/<userId>/`: community post images<br>`events/<eventId>/badge-photos/`: badge fallback photos |
+
+- **Before an event exists:** banners uploaded from the create form go to `drafts/<adminId>/banner/`.
+- **Deleting an event** removes its stored files too: `events/<id>/` in both buckets, `community/<id>/` and a banner still in `drafts/`. If storage fails, the deletion still succeeds and the error is logged.
+- **Older uploads:** they stay in the flat `events/` folder and are not removed when their event is deleted, because they can't be matched to one event. Their signed URLs are stored in the database and still work, so don't move or delete them by hand.
+- **Font MIME type:** the banners bucket must allow `font/woff2` if it restricts MIME types.
 
 ## Database Backup & Restore (1:1)
 

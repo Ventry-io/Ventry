@@ -135,7 +135,7 @@ function resolveSelectedTicketId(reg: Registration) {
   return '';
 }
 
-export default function RegistrationManager() {
+export default function RegistrationManager({ eventId }: { eventId: string }) {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -160,8 +160,8 @@ export default function RegistrationManager() {
     setLoading(true);
     try {
       const url = statusFilter === 'ALL' 
-        ? '/api/admin/registrations' 
-        : `/api/admin/registrations?status=${statusFilter}`;
+        ? `/api/admin/registrations?eventId=${eventId}`
+        : `/api/admin/registrations?eventId=${eventId}&status=${statusFilter}`;
       
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch registrations');
@@ -172,7 +172,7 @@ export default function RegistrationManager() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, eventId]);
 
   const fetchEventDetails = async (eventId: number) => {
     setEventLoading(true);

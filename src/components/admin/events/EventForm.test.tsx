@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import EventForm from "./EventForm";
 
 async function addDropdownCustomField() {
+  fireEvent.click(screen.getByRole("switch", { name: "Advanced settings, tickets and additional features" }));
   fireEvent.click(screen.getByRole("tab", { name: "Custom Fields" }));
   fireEvent.click(screen.getByRole("button", { name: /Add Field/ }));
 
@@ -55,5 +56,14 @@ describe("EventForm custom field dropdown options", () => {
     fireEvent.change(screen.getByDisplayValue("Re"), { target: { value: "Red" } });
 
     expect(screen.getByDisplayValue("Red")).toBe(input);
+  });
+});
+
+describe("simple event creation", () => {
+  it("saves basic details without inventing a ticket", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<EventForm onSubmit={onSubmit} initialData={{ name: "Park meeting", description: "At the entrance", startDate: "2027-05-01T12:00:00Z", endDate: "2027-05-01T14:00:00Z", location: { name: "Park", address: "Entrance", city: "Berlin", country: "DE" } }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create Event" }));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ name: "Park meeting", products: [], requiresHotel: false })));
   });
 });

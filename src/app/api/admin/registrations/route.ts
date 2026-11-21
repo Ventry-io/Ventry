@@ -20,7 +20,16 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: "Admin profile incomplete" }, { status: 403 });
         }
 
+        if (!eventId || !/^[1-9]\d*$/.test(eventId) || !Number.isSafeInteger(Number(eventId))) {
+            return NextResponse.json({ error: "Select a valid event" }, { status: 400 });
+        }
+        if (status && !["PENDING", "APPROVED", "CONFIRMED", "CANCELLED", "WAITLISTED"].includes(status)) {
+            return NextResponse.json({ error: "Invalid registration status" }, { status: 400 });
+        }
+
         const eventFilter = await adminEventFilter(authResult.adminId);
+        const selectedEvent = await prisma.event.findFirst({ where: { AND: [eventFilter, { id: Number(eventId) }] }, select: { id: true } });
+        if (!selectedEvent) return forbiddenResponse("Event access required");
 
         const registrations = await prisma.registration.findMany({
             where: {

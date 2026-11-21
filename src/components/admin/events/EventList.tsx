@@ -26,7 +26,8 @@ import {
   Visibility,
   QrCodeScanner,
   Badge,
-  Hotel
+  Hotel,
+  Palette
 } from '@mui/icons-material';
 import Link from 'next/link';
 import type { SerializedEvent } from '@/types/event';
@@ -70,7 +71,7 @@ export default function EventList({ initialEvents }: EventListProps) {
 
   const columns: GridColDef[] = [
     { field: 'id', headerName: 'ID', width: 70 },
-    { field: 'name', headerName: 'Event Name', flex: 1 },
+    { field: 'name', headerName: 'Event Name', flex: 1, renderCell: (params: GridRenderCellParams) => <Link href={`/admin?eventId=${params.row.id}`}>{params.row.name}</Link> },
     { 
       field: 'startDate', 
       headerName: 'Starts', 
@@ -99,7 +100,7 @@ export default function EventList({ initialEvents }: EventListProps) {
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 230,
+      width: 270,
       sortable: false,
       renderCell: (params: GridRenderCellParams) => (
         <Stack direction="row" spacing={1}>
@@ -110,6 +111,15 @@ export default function EventList({ initialEvents }: EventListProps) {
             title="Edit"
           >
             <Edit fontSize="small" />
+          </IconButton>
+          <IconButton
+            size="small"
+            component={Link}
+            href={`/admin/events/${params.row.id}/page-designer`}
+            title="Page designer"
+            aria-label="Page designer"
+          >
+            <Palette fontSize="small" />
           </IconButton>
           <IconButton 
             size="small" 

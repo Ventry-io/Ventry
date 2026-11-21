@@ -77,6 +77,11 @@ function buildCreateEventArgs(
                 create: toPersistedProducts(validatedData.products)
             },
             requireApproval: validatedData.requireApproval,
+            publishAt: validatedData.publishAt,
+            registrationOpensAt: validatedData.registrationOpensAt,
+            maxRegistrations: validatedData.maxRegistrations,
+            requiresHotel: validatedData.requiresHotel,
+            paymentDeadline: validatedData.paymentDeadline,
             scanOnce: validatedData.scanOnce,
             communityEnabled: validatedData.communityEnabled ?? false,
             communityOpenAfterEnd: validatedData.communityOpenAfterEnd ?? true,

@@ -1,3 +1,4 @@
+import { withEventScope } from "@/lib/events/admin-context";
 import { Suspense } from "react";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
@@ -19,12 +20,13 @@ import { prisma } from "@/lib/prisma/prisma";
 import { checkAdminAuth, adminEventFilter, getAdminFinanceAccess } from "@/lib/auth/admin";
 import { redirect } from "next/navigation";
 
-async function getDashboardStats(adminId: string, orgScope?: string) {
-    const [eventFilter, financeAccess] = await Promise.all([
+async function getDashboardStats(adminId: string, eventId: string, orgScope?: string) {
+    const [baseFilter, financeAccess] = await Promise.all([
         adminEventFilter(adminId, orgScope),
         getAdminFinanceAccess(adminId, orgScope),
     ]);
 
+    const eventFilter = withEventScope(baseFilter, eventId);
     const [
         totalRegistrants,
         verifiedRegistrants,
@@ -62,7 +64,7 @@ async function getDashboardStats(adminId: string, orgScope?: string) {
             _sum: { amount: true },
             where: {
                 paymentStatus: "COMPLETED",
-                registration: { event: financeAccess.eventFilter },
+                registration: { event: withEventScope(financeAccess.eventFilter, eventId) },
             },
         }) : null,
     ]);
@@ -92,8 +94,8 @@ function StatSkeleton() {
     );
 }
 
-async function DashboardStats({ adminId, orgScope }: { adminId: string; orgScope?: string }) {
-    const stats = await getDashboardStats(adminId, orgScope);
+async function DashboardStats({ adminId, orgScope, eventId }: { adminId: string; orgScope?: string; eventId: string }) {
+    const stats = await getDashboardStats(adminId, eventId, orgScope);
     const verifiedPct = stats.totalRegistrants
         ? Math.round((stats.verifiedRegistrants / stats.totalRegistrants) * 100)
         : 0;
@@ -187,7 +189,7 @@ async function DashboardStats({ adminId, orgScope }: { adminId: string; orgScope
     );
 }
 
-type Props = { searchParams: Promise<{ orgFilter?: string }> };
+type Props = { searchParams: Promise<{ orgFilter?: string; eventId?: string }> };
 
 export default async function AdminDashboardPage({ searchParams }: Props) {
     const auth = await checkAdminAuth();
@@ -201,7 +203,8 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
         );
     }
 
-    const { orgFilter } = await searchParams;
+    const { orgFilter, eventId } = await searchParams;
+    if (!eventId) redirect("/admin/events");
 
     return (
         <Box>
@@ -215,7 +218,7 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
                         <StatSkeleton key={i} />
                     ))}
                 >
-                    <DashboardStats adminId={auth.adminId} orgScope={orgFilter} />
+                    <DashboardStats key={eventId} eventId={eventId} adminId={auth.adminId} orgScope={orgFilter} />
                 </Suspense>
             </Grid>
         </Box>

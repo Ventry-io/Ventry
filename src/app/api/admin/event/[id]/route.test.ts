@@ -15,6 +15,7 @@ vi.mock("@/lib/prisma/prisma", () => ({
             update: vi.fn(),
             delete: vi.fn()
         },
+        product: { findMany: vi.fn() },
         registration: {
             count: vi.fn()
         }
@@ -32,6 +33,8 @@ vi.mock("@/lib/auth/admin", () => ({
     )
 }));
 
+vi.mock("@/lib/supabase", () => ({ deleteEventMedia: vi.fn() }));
+
 vi.mock("@/lib/auth/event-admin", () => ({
     checkEventAdminAuth: vi.fn()
 }));
@@ -41,6 +44,7 @@ import { prisma } from "@/lib/prisma/prisma";
 import { forbiddenResponse } from "@/lib/auth/admin";
 import { checkEventAdminAuth } from "@/lib/auth/event-admin";
 import { adminUpdateEventSchema } from "@/types/schemas/event/admin";
+import { deleteEventMedia } from "@/lib/supabase";
 
 const mockedCheckEventAdminAuth = checkEventAdminAuth as unknown as ReturnType<typeof vi.fn>;
 const mockedForbiddenResponse = forbiddenResponse as unknown as ReturnType<typeof vi.fn>;
@@ -70,6 +74,7 @@ describe("App Router: /api/admin/event/[id]", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mockedCheckEventAdminAuth.mockResolvedValue({ authorized: true });
+        vi.mocked(prisma.product.findMany).mockResolvedValue([]);
     });
 
     describe("GET", () => {
@@ -114,6 +119,14 @@ describe("App Router: /api/admin/event/[id]", () => {
     });
 
     describe("PATCH", () => {
+        it("keeps booked products when a submitted layout omits them", async () => {
+            mockedUpdateParse.mockReturnValue({ products: [] });
+            vi.mocked(prisma.product.findMany).mockResolvedValue([{ id: "booked" }] as never);
+            const response = await adminRoute.PATCH(patchRequest("http://localhost/api/admin/event/7", { products: [] }), { params: Promise.resolve({ id: "7" }) });
+            expect(response.status).toBe(409);
+            expect(mockedUpdate).not.toHaveBeenCalled();
+        });
+
         it("returns 200 and updates the event", async () => {
             const input = {
                 name: "Updated Event",
@@ -187,33 +200,11 @@ describe("App Router: /api/admin/event/[id]", () => {
                             }
                         },
                         products: {
-                            deleteMany: {},
-                            create: [
-                                {
-                                    id: "ticket-basic",
-                                    name: "Basic",
-                                    description: "Basic ticket",
-                                    price: 100,
-                                    type: "TICKET",
-                                    capacity: 50
-                                },
-                                {
-                                    id: "shirt",
-                                    name: "T-Shirt",
-                                    description: "Merch addon",
-                                    price: 25,
-                                    type: "ADDON",
-                                    capacity: 100
-                                },
-                                {
-                                    id: "room-standard",
-                                    name: "Standard Room",
-                                    description: "Hotel room",
-                                    price: 199,
-                                    type: "ACCOMMODATION",
-                                    capacity: 20
-                                }
-                            ]
+                            deleteMany: { id: { notIn: ["ticket-basic", "shirt", "room-standard"] } },
+                            upsert: input.products.map(product => {
+                                const { id, ...data } = product;
+                                return { where: { id }, create: { ...data, id }, update: data };
+                            }),
                         }
                     })
                 })
@@ -256,11 +247,26 @@ describe("App Router: /api/admin/event/[id]", () => {
 
             expect(response.status).toBe(409);
             expect(mockedDelete).not.toHaveBeenCalled();
+            expect(deleteEventMedia).not.toHaveBeenCalled();
+        });
+
+        it("still reports success when removing the stored files fails", async () => {
+            mockedRegistrationCount.mockResolvedValue(0);
+            mockedDelete.mockResolvedValue({ id: 7, imageUrl: null });
+            vi.mocked(deleteEventMedia).mockRejectedValueOnce(new Error("storage down"));
+            const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+            const response = await adminRoute.DELETE(deleteRequest("http://localhost/api/admin/event/7"), { params: Promise.resolve({ id: "7" }) });
+
+            expect(response.status).toBe(200);
+            expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("event 7"), expect.any(Error));
+            consoleError.mockRestore();
         });
 
         it("returns 200 and deletes when no registrations exist", async () => {
             mockedRegistrationCount.mockResolvedValue(0);
-            mockedDelete.mockResolvedValue({ id: 7 });
+            mockedDelete.mockResolvedValue({ id: 7, imageUrl: "https://abc.supabase.co/banner.jpg" });
+            vi.mocked(deleteEventMedia).mockResolvedValue(3);
 
             const response = await adminRoute.DELETE(
                 deleteRequest("http://localhost/api/admin/event/7"),
@@ -270,6 +276,7 @@ describe("App Router: /api/admin/event/[id]", () => {
             expect(response.status).toBe(200);
             expect(await response.json()).toEqual({ message: "Event deleted successfully" });
             expect(mockedDelete).toHaveBeenCalledWith({ where: { id: 7 } });
+            expect(deleteEventMedia).toHaveBeenCalledWith(7, "https://abc.supabase.co/banner.jpg");
         });
     });
 });

@@ -11,9 +11,9 @@ const LocationSchema = z.object({
     name: z.string().min(1, "Venue name is required"),
     address: z.string().min(1, "Address is required"),
     city: z.string().min(1, "City is required"),
-    state: z.string().min(1, "State is required"),
+    state: z.string().default(""),
     country: z.string().min(1, "Country is required"),
-    postalCode: z.string().min(1, "Postal code is required"),
+    postalCode: z.string().default(""),
 }).strict();
 type Location = z.infer<typeof LocationSchema>;
 
@@ -28,7 +28,7 @@ const ProductSchema = z.object({
   id: z.string().min(1).optional(),
   name: z.string().min(1, "Product name is required"),
   description: z.string().nullable().optional(),
-  price: z.coerce.number().nonnegative("Price cannot be negative"),
+  price: z.union([z.number(), z.string().trim().min(1)]).pipe(z.coerce.number<string | number>().nonnegative("Price cannot be negative")),
   type: ProductTypeSchema,
   capacity: z.coerce.number().int().positive().nullable().optional(),
   order: z.coerce.number().int().default(0),

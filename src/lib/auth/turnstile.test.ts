@@ -28,6 +28,11 @@ describe("Turnstile verification", () => {
     expect(await verifyTurnstile(headers)).toBe(true);
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ secret: "secret", response: "widget-token" });
   });
+  it("accepts Cloudflare test-key responses, which carry no action", async () => {
+    vi.stubEnv("TURNSTILE_HOSTNAMES", "");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ success: true, hostname: "example.com", metadata: { result_with_testing_key: true } })));
+    expect(await verifyTurnstile(headers)).toBe(true);
+  });
   it.each([
     { success: false, "error-codes": ["invalid-input-response"] },
     { success: false, "error-codes": ["timeout-or-duplicate"] },

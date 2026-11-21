@@ -33,6 +33,8 @@ vi.mock("@/lib/auth/admin", () => ({
     )
 }));
 
+vi.mock("@/lib/supabase", () => ({ deleteEventMedia: vi.fn() }));
+
 vi.mock("@/lib/auth/event-admin", () => ({
     checkEventAdminAuth: vi.fn()
 }));
@@ -42,6 +44,7 @@ import { prisma } from "@/lib/prisma/prisma";
 import { forbiddenResponse } from "@/lib/auth/admin";
 import { checkEventAdminAuth } from "@/lib/auth/event-admin";
 import { adminUpdateEventSchema } from "@/types/schemas/event/admin";
+import { deleteEventMedia } from "@/lib/supabase";
 
 const mockedCheckEventAdminAuth = checkEventAdminAuth as unknown as ReturnType<typeof vi.fn>;
 const mockedForbiddenResponse = forbiddenResponse as unknown as ReturnType<typeof vi.fn>;
@@ -244,11 +247,26 @@ describe("App Router: /api/admin/event/[id]", () => {
 
             expect(response.status).toBe(409);
             expect(mockedDelete).not.toHaveBeenCalled();
+            expect(deleteEventMedia).not.toHaveBeenCalled();
+        });
+
+        it("still reports success when removing the stored files fails", async () => {
+            mockedRegistrationCount.mockResolvedValue(0);
+            mockedDelete.mockResolvedValue({ id: 7, imageUrl: null });
+            vi.mocked(deleteEventMedia).mockRejectedValueOnce(new Error("storage down"));
+            const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+            const response = await adminRoute.DELETE(deleteRequest("http://localhost/api/admin/event/7"), { params: Promise.resolve({ id: "7" }) });
+
+            expect(response.status).toBe(200);
+            expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("event 7"), expect.any(Error));
+            consoleError.mockRestore();
         });
 
         it("returns 200 and deletes when no registrations exist", async () => {
             mockedRegistrationCount.mockResolvedValue(0);
-            mockedDelete.mockResolvedValue({ id: 7 });
+            mockedDelete.mockResolvedValue({ id: 7, imageUrl: "https://abc.supabase.co/banner.jpg" });
+            vi.mocked(deleteEventMedia).mockResolvedValue(3);
 
             const response = await adminRoute.DELETE(
                 deleteRequest("http://localhost/api/admin/event/7"),
@@ -258,6 +276,7 @@ describe("App Router: /api/admin/event/[id]", () => {
             expect(response.status).toBe(200);
             expect(await response.json()).toEqual({ message: "Event deleted successfully" });
             expect(mockedDelete).toHaveBeenCalledWith({ where: { id: 7 } });
+            expect(deleteEventMedia).toHaveBeenCalledWith(7, "https://abc.supabase.co/banner.jpg");
         });
     });
 });

@@ -228,6 +228,8 @@ model Event {
   paymentDeadline     DateTime?
   schedule            Json            @default("[]")
   pageDesign          Json            @default("{}")
+  pageDesignDraft     Json?
+  pageDesignPublishedAt DateTime?
   requiresHotel       Boolean         @default(false)
   requireApproval     Boolean         @default(false)
   scanOnce            Boolean         @default(false)

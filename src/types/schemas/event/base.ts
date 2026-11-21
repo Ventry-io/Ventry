@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { EventPageSchema } from "./page";
 import { StayPolicySchema, type StayPolicy } from "./accommodation";
 
 const EventIdSchema = z.uuid();
@@ -117,7 +116,6 @@ export const EventBaseObject = z.object({
   endDate: z.coerce.date(),
   location: LocationSchema,
   imageUrl: z.url().nullable().optional(),
-  pageDesign: EventPageSchema.optional(),
   products: z.array(ProductSchema).default([]),
 
   /** Scheduled time for automatic status change to PUBLISHED */

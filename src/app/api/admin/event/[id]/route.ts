@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { forbiddenResponse } from "@/lib/auth/admin";
 import { checkEventAdminAuth } from "@/lib/auth/event-admin";
+import { deleteEventMedia } from "@/lib/supabase";
 import { adminUpdateEventSchema } from "@/types/schemas/event/admin";
 import { z } from "zod";
 
@@ -77,7 +78,6 @@ export async function PATCH(
                 stayPolicy: validatedData.stayPolicy as Prisma.InputJsonValue,
                 customFields: validatedData.customFields as Prisma.InputJsonValue,
                 schedule: validatedData.schedule as Prisma.InputJsonValue,
-                pageDesign: validatedData.pageDesign as Prisma.InputJsonValue | undefined,
                 // Handle location update
                 ...(location && {
                     location: {
@@ -144,9 +144,12 @@ export async function DELETE(
             }, { status: 409 });
         }
 
-        await prisma.event.delete({
+        const deleted = await prisma.event.delete({
             where: { id }
         });
+
+        // The event is gone either way; a storage hiccup only leaves files behind, so it is logged, not returned.
+        await deleteEventMedia(id, deleted.imageUrl).catch(error => console.error(`Could not remove media of deleted event ${id}:`, error));
 
         return NextResponse.json({ message: "Event deleted successfully" }, { status: 200 });
     } catch (error) {

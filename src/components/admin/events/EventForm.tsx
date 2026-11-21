@@ -29,8 +29,6 @@ import { adminCreateEventSchema, type AdminCreateEventInput } from "@/types/sche
 import type { Product as EventProduct } from "@/types/schemas/event/base";
 import ImageCropper from "@/components/profile/ImageCropper";
 import Image from "next/image";
-import EventPageEditor from "./EventPageEditor";
-import { normalizeEventPage, type EventPage } from "@/types/schemas/event/page";
 import ScheduleCalendarBuilder, { type ScheduleItem } from "./ScheduleCalendarBuilder";
 import { SortableProductItem } from "./SortableProductItem";
 import {
@@ -65,7 +63,6 @@ export interface InitialData {
   products?: unknown[];
   customFields?: unknown[];
   schedule?: unknown[];
-  pageDesign?: unknown;
 }
 
 interface EventFormProps {
@@ -217,7 +214,6 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
   } = useForm<AdminCreateEventInput>({
     resolver: zodResolver(adminCreateEventSchema),
     defaultValues: {
-      pageDesign: normalizeEventPage(initialData?.pageDesign),
       name: initialData?.name || "",
       description: initialData?.description || "",
       startDate: initialData?.startDate ? new Date(initialData.startDate) : new Date(),
@@ -360,6 +356,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
     try {
       const formData = new FormData();
       formData.append("file", croppedBlob);
+      if (initialData?.id) formData.append("eventId", String(initialData.id));
 
       const response = await fetch("/api/admin/media/upload", {
         method: "POST",
@@ -897,7 +894,7 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
   return (
     <Box component="form" onSubmit={event => { void handleSubmit(onFormSubmit, invalid => {
       setError("Please correct the highlighted fields before saving.");
-      const tab = invalid.location ? 1 : invalid.pageDesign ? 5 : invalid.customFields ? 3 : invalid.schedule ? 4 : 0;
+      const tab = invalid.location ? 1 : invalid.customFields ? 3 : invalid.schedule ? 4 : 0;
       if (tab === 3 || tab === 4) setAdvanced(true);
       setTabValue(tab);
     })(event); }}>
@@ -965,7 +962,6 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
               </Stack>
             }
           />
-          <Tab label="Page designer" />
         </Tabs>
 
         <Box sx={{ p: 3 }}>
@@ -1759,7 +1755,6 @@ export default function EventForm({ initialData, onSubmit, loading: externalLoad
               />
             </Stack>
           )}
-          {tabValue === 5 && <Controller control={control} name="pageDesign" render={({ field }) => <EventPageEditor value={(field.value || normalizeEventPage({})) as EventPage} onChange={field.onChange} onUploadingChange={setUploading} eventId={initialData?.id} name={watch("name")} description={watch("description")} location={watch("location")} imageUrl={watchImageUrl} schedule={watch("schedule")} />} />}
         </Box>
       </Paper>
 

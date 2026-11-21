@@ -42,13 +42,17 @@ jobs:
           DEV_BETTER_AUTH_URL: ${{ secrets.DEV_BETTER_AUTH_URL }}
           MAIN_BETTER_AUTH_URL: ${{ secrets.MAIN_BETTER_AUTH_URL }}
           DEV_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.DEV_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          DEV_NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.DEV_NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
           MAIN_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.MAIN_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          MAIN_NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.MAIN_NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
           DEV_DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
           MAIN_DATABASE_URL: ${{ secrets.MAIN_DATABASE_URL }}
           VENUVA_DEV_BETTER_AUTH_URL: ${{ secrets.VENUVA_DEV_BETTER_AUTH_URL }}
           VENUVA_MAIN_BETTER_AUTH_URL: ${{ secrets.VENUVA_MAIN_BETTER_AUTH_URL }}
           VENUVA_DEV_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VENUVA_DEV_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          VENUVA_DEV_NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.VENUVA_DEV_NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
           VENUVA_MAIN_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.VENUVA_MAIN_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+          VENUVA_MAIN_NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.VENUVA_MAIN_NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
           VENUVA_DEV_DATABASE_URL: ${{ secrets.VENUVA_DEV_DATABASE_URL }}
           VENUVA_MAIN_DATABASE_URL: ${{ secrets.VENUVA_MAIN_DATABASE_URL }}
         run: |
@@ -66,6 +70,7 @@ jobs:
               echo "compose_filename=docker-compose.dev.yml" >> "$GITHUB_OUTPUT"
               echo "better_auth_url=${DEV_BETTER_AUTH_URL:-https://dev-ventry.m-loeffler.de}" >> "$GITHUB_OUTPUT"
               echo "stripe_publishable_key=${DEV_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}" >> "$GITHUB_OUTPUT"
+              echo "turnstile_site_key=${DEV_NEXT_PUBLIC_TURNSTILE_SITE_KEY}" >> "$GITHUB_OUTPUT"
               echo "health_url=https://dev-ventry.m-loeffler.de/api/health" >> "$GITHUB_OUTPUT"
               echo "database_url=${DEV_DATABASE_URL}" >> "$GITHUB_OUTPUT"
               echo "deploy_path=/docker/ventry" >> "$GITHUB_OUTPUT"
@@ -77,6 +82,7 @@ jobs:
               echo "compose_filename=docker-compose.main.yml" >> "$GITHUB_OUTPUT"
               echo "better_auth_url=${MAIN_BETTER_AUTH_URL:-https://ventry.m-loeffler.de}" >> "$GITHUB_OUTPUT"
               echo "stripe_publishable_key=${MAIN_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}" >> "$GITHUB_OUTPUT"
+              echo "turnstile_site_key=${MAIN_NEXT_PUBLIC_TURNSTILE_SITE_KEY}" >> "$GITHUB_OUTPUT"
               echo "health_url=https://ventry.m-loeffler.de/api/health" >> "$GITHUB_OUTPUT"
               echo "database_url=${MAIN_DATABASE_URL}" >> "$GITHUB_OUTPUT"
               echo "deploy_path=/docker/ventry" >> "$GITHUB_OUTPUT"
@@ -88,6 +94,7 @@ jobs:
               echo "compose_filename=docker-compose.dev.yml" >> "$GITHUB_OUTPUT"
               echo "better_auth_url=${VENUVA_DEV_BETTER_AUTH_URL:-https://dev.venuva.dog}" >> "$GITHUB_OUTPUT"
               echo "stripe_publishable_key=${VENUVA_DEV_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}" >> "$GITHUB_OUTPUT"
+              echo "turnstile_site_key=${VENUVA_DEV_NEXT_PUBLIC_TURNSTILE_SITE_KEY}" >> "$GITHUB_OUTPUT"
               echo "health_url=https://dev.venuva.dog/api/health" >> "$GITHUB_OUTPUT"
               echo "database_url=${VENUVA_DEV_DATABASE_URL}" >> "$GITHUB_OUTPUT"
               echo "deploy_path=/docker/venuva" >> "$GITHUB_OUTPUT"
@@ -99,6 +106,7 @@ jobs:
               echo "compose_filename=docker-compose.main.yml" >> "$GITHUB_OUTPUT"
               echo "better_auth_url=${VENUVA_MAIN_BETTER_AUTH_URL:-https://venuva.dog}" >> "$GITHUB_OUTPUT"
               echo "stripe_publishable_key=${VENUVA_MAIN_NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY}" >> "$GITHUB_OUTPUT"
+              echo "turnstile_site_key=${VENUVA_MAIN_NEXT_PUBLIC_TURNSTILE_SITE_KEY}" >> "$GITHUB_OUTPUT"
               echo "health_url=https://venuva.dog/api/health" >> "$GITHUB_OUTPUT"
               echo "database_url=${VENUVA_MAIN_DATABASE_URL}" >> "$GITHUB_OUTPUT"
               echo "deploy_path=/docker/venuva" >> "$GITHUB_OUTPUT"
@@ -142,6 +150,7 @@ jobs:
           build-args: |
             BETTER_AUTH_URL=${{ steps.target.outputs.better_auth_url }}
             NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${{ steps.target.outputs.stripe_publishable_key }}
+            NEXT_PUBLIC_TURNSTILE_SITE_KEY=${{ steps.target.outputs.turnstile_site_key }}
             NEXT_PUBLIC_GIT_COMMIT=${{ steps.build_metadata.outputs.commit }}
             NEXT_PUBLIC_GIT_TAG=${{ steps.build_metadata.outputs.tag }}
             NEXT_PUBLIC_BUILD_DATE=${{ steps.build_metadata.outputs.build_date }}

@@ -11,6 +11,7 @@ function AdminEventSelectContent() {
   const pathname = usePathname();
   const search = useSearchParams();
   const selectedId = /^\/admin\/events\/(\d+)(?:\/|$)/.exec(pathname)?.[1] || search.get("eventId") || "";
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refetch on navigation so newly created events appear
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/admin/event", { signal: controller.signal }).then(response => {
@@ -31,7 +32,7 @@ function AdminEventSelectContent() {
       {events.map(event => <MenuItem key={event.id} value={String(event.id)}>{event.name}</MenuItem>)}
     </TextField>
     {selectedId && events.some(event => String(event.id) === selectedId) && <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 1 }}>
-      {[["", "Event settings"], ["/check-in", "Check-in"], ["/badges", "Badges"], ["/community", "Community"]].map(([suffix, label]) => <Button key={label} href={`/admin/events/${selectedId}${suffix}`}>{label}</Button>)}
+      {[["", "Event settings"], ["/page-designer", "Page designer"], ["/check-in", "Check-in"], ["/badges", "Badges"], ["/community", "Community"], ["/rooms", "Rooms"]].map(([suffix, label]) => <Button key={label} href={`/admin/events/${selectedId}${suffix}`}>{label}</Button>)}
       <Button href={`/events/${selectedId}`}>Public page</Button>
     </Stack>}
   </Box>;

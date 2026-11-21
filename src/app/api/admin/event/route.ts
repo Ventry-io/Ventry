@@ -68,7 +68,6 @@ function buildCreateEventArgs(
             stayPolicy: validatedData.stayPolicy as Prisma.InputJsonValue,
             customFields: validatedData.customFields as Prisma.InputJsonValue,
             schedule: validatedData.schedule as Prisma.InputJsonValue,
-            pageDesign: validatedData.pageDesign as Prisma.InputJsonValue | undefined,
             ownerId: adminId,
             ...(organizationId ? { organizationId } : {}),
             location: {

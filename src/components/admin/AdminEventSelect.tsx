@@ -20,20 +20,24 @@ function AdminEventSelectContent() {
     }).then(data => setEvents(data.events)).catch(error => { if (error.name !== "AbortError") setError(true); });
     return () => controller.abort();
   }, [pathname]);
-  return <Box sx={{ mb: 2 }}>
+  return <Box sx={{ mb: 4 }}>
     {error && <Alert severity="error">Events could not load. Reload to retry.</Alert>}
     <TextField select fullWidth label="Active event" value={events.some(event => String(event.id) === selectedId) ? selectedId : ""} onChange={event => {
       const id = event.target.value;
       const eventPath = /^\/admin\/events\/\d+(\/.*)?$/.exec(pathname);
       const target = eventPath ? `/admin/events/${id}${eventPath[1] || ""}` : ["/admin", "/admin/users", "/admin/tickets", "/admin/billing"].includes(pathname) ? pathname : "/admin";
       router.push(`${target}?eventId=${id}`);
-    }} sx={{ maxWidth: 480 }}>
+    }} size="small" sx={{ maxWidth: 420 }}>
       <MenuItem value="" disabled>Select an event to manage</MenuItem>
       {events.map(event => <MenuItem key={event.id} value={String(event.id)}>{event.name}</MenuItem>)}
     </TextField>
-    {selectedId && events.some(event => String(event.id) === selectedId) && <Stack direction="row" flexWrap="wrap" gap={1} sx={{ mt: 1 }}>
-      {[["", "Event settings"], ["/page-designer", "Page designer"], ["/check-in", "Check-in"], ["/badges", "Badges"], ["/community", "Community"], ["/rooms", "Rooms"]].map(([suffix, label]) => <Button key={label} href={`/admin/events/${selectedId}${suffix}`}>{label}</Button>)}
-      <Button href={`/events/${selectedId}`}>Public page</Button>
+    {selectedId && events.some(event => String(event.id) === selectedId) && <Stack component="nav" aria-label="Event tools" direction="row" flexWrap="wrap" gap={1} sx={{ mt: 1.5 }}>
+      {[["", "Event settings"], ["/page-designer", "Page designer"], ["/check-in", "Check-in"], ["/badges", "Badges"], ["/community", "Community"], ["/rooms", "Rooms"]].map(([suffix, label]) => {
+        const href = `/admin/events/${selectedId}${suffix}`;
+        const current = pathname === href;
+        return <Button key={label} href={href} size="small" variant={current ? "contained" : "outlined"} aria-current={current ? "page" : undefined}>{label}</Button>;
+      })}
+      <Button href={`/events/${selectedId}`} size="small">Public page</Button>
     </Stack>}
   </Box>;
 }

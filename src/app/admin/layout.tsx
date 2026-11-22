@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Container, Box, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Toolbar, Divider, IconButton, Tooltip } from "@mui/material";
 import { Event, Dashboard, People, Settings, Home, SupportAgent, Payments, ChevronLeft, ChevronRight, Business } from "@mui/icons-material";
 import Link from "next/link";
@@ -27,14 +27,19 @@ const secondaryLinks = [
 
 type NavLink = { href: string; label: string; Icon: typeof Dashboard };
 
-function NavLinkItem({ href, label, Icon, expanded }: NavLink & { expanded: boolean }) {
+function NavLinkItem({ href, label, Icon, expanded, selected = false }: NavLink & { expanded: boolean; selected?: boolean }) {
   return (
     <ListItem disablePadding sx={{ display: "block" }}>
       <Tooltip title={expanded ? "" : label} placement="right">
         <ListItemButton
           component={Link}
           href={href}
-          sx={{ minHeight: 48, justifyContent: expanded ? "initial" : "center", px: 2 }}
+          selected={selected}
+          aria-current={selected ? "page" : undefined}
+          sx={{
+            minHeight: 44, justifyContent: expanded ? "initial" : "center", px: 1.5, mx: 1, my: 0.25, fontWeight: 500,
+            "&.Mui-selected, &.Mui-selected:hover": { bgcolor: "background.paper", boxShadow: "0 0 0 1px var(--rule)", "& .MuiListItemText-primary": { fontWeight: 600 }, "& .MuiListItemIcon-root": { color: "primary.main" } },
+          }}
         >
           <ListItemIcon sx={{ minWidth: 0, mr: expanded ? 2 : 0, justifyContent: "center" }}>
             <Icon />
@@ -56,7 +61,9 @@ function AdminNavLinksInner({ links, expanded }: { links: NavLink[]; expanded: b
     if (orgFilter) params.set("orgFilter", orgFilter);
     if (eventId && href.startsWith("/admin")) params.set("eventId", eventId);
     const resolvedHref = `${href}${params.size ? `?${params}` : ""}`;
-    return <NavLinkItem key={href} href={resolvedHref} label={label} Icon={Icon} expanded={expanded} />;
+    // "/admin" only matches itself; other entries also own their subpages.
+    const selected = href === "/admin" ? pathname === "/admin" : href !== "/" && pathname.startsWith(href);
+    return <NavLinkItem key={href} href={resolvedHref} label={label} Icon={Icon} expanded={expanded} selected={selected} />;
   });
 }
 
@@ -76,13 +83,19 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Labels help organizers find things faster; open the rail by default where there is room. Set after mount to avoid a hydration mismatch.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time layout default from the viewport width
+    if (window.matchMedia("(min-width: 1200px)").matches) setExpanded(true);
+  }, []);
   const activeDrawerWidth = expanded ? drawerWidth : collapsedDrawerWidth;
 
   return (
     <Box
       sx={{
         display: "flex",
-        "& ~ footer": {
+        // The app footer sits outside this layout (root layout), so reach it from body instead of a sibling selector.
+        "body:has(&) footer": {
           ml: `${activeDrawerWidth}px`,
           width: `calc(100% - ${activeDrawerWidth}px)`,
           transition: theme => theme.transitions.create(["margin-left", "width"], {
@@ -136,7 +149,6 @@ export default function AdminLayout({
           }),
         }}
       >
-        <Toolbar />
         <Container maxWidth="xl" disableGutters>
           <AdminEventSelect />
           <AdminOrgFilterSelect />

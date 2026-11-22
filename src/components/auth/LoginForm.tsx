@@ -212,20 +212,22 @@ export default function LoginForm({ callbackUrl, captchaToken = "", resetCaptcha
                         visibility: (loading || success) ? "hidden" : "visible",
                         position: (loading || success) ? "absolute" : "static",
                     }}>
-                        Login
+                        Log in
                     </span>
                     {loading && <CircularProgress size={24} sx={progressSx} />}
                     {success && <CheckCircle sx={{ ...progressSx, animation: "scale 0.3s"}} />}
                 </Button>
 
-                <Button onClick={() => setPasswordForgetOpen(true)}>
-                    Reset Password
-                </Button>
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button size="small" onClick={() => setPasswordForgetOpen(true)}>
+                        Forgot password?
+                    </Button>
+                </Box>
 
                 <LoginMethodBox>
-                    <Button onClick={() => void doPasskeyLogin()} disabled={loading || success || turnstileEnabled && !captchaToken} className="w-full rounded-xl border px-4 py-2">
+                    <Button variant="outlined" fullWidth onClick={() => void doPasskeyLogin()} disabled={loading || success || turnstileEnabled && !captchaToken}>
                     <Icon className="fa-solid fa-fingerprint" sx={{ mr: 1 }} />
-                        Login with Passkey
+                        Log in with a passkey
                     </Button>
                     {!success && <LastUsedIndicator loginMethod="passkey" />}
                 </LoginMethodBox>

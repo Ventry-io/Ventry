@@ -6,11 +6,11 @@ import Skeleton from "@mui/material/Skeleton";
 import Divider from "@mui/material/Divider";
 import Alert from "@mui/material/Alert";
 import AlertTitle from "@mui/material/AlertTitle";
-import { AttachMoney, TrendingUp, Cancel, HourglassEmpty } from "@mui/icons-material";
-import StatCard from "@/components/admin/StatCard/StatCard";
+import StatCard, { StatRow } from "@/components/admin/StatCard/StatCard";
 import { checkAdminAuth } from "@/lib/auth/admin";
 import { redirect } from "next/navigation";
 import { getBillingData } from "./billing-data";
+import { BRAND_NAME } from "@/lib/brand";
 import RecentPaymentsTable from "./RecentPaymentsTable";
 
 const fmt = (amount: number) =>
@@ -53,70 +53,52 @@ async function BillingContent({ adminId, orgScope, eventId }: { adminId: string;
             {/* Summary cards */}
             <Grid size={12}>
                 <Typography variant="h6" fontWeight={600} color="text.secondary">Overview</Typography>
-                <Divider sx={{ mt: 0.5, mb: 2 }} />
             </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <StatCard
-                    label="Gross Revenue"
-                    value={fmt(data.completed.sum)}
-                    sub={`${data.completed.count} completed payments`}
-                    Icon={TrendingUp}
-                    color="success.main"
-                />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <StatCard
-                    label="Est. Stripe Fees"
-                    value={fmt(data.stripeFees)}
-                    sub="1.5% + €0.25 / txn (approx.)"
-                    Icon={AttachMoney}
-                    color="warning.main"
-                />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <StatCard
-                    label="Platform Fee"
-                    value={fmt(data.platformFees)}
-                    sub="Ventry's own cut"
-                    Icon={AttachMoney}
-                    color="warning.main"
-                />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <StatCard
-                    label="Net Revenue"
-                    value={fmt(data.netRevenue)}
-                    sub="After estimated fees"
-                    Icon={AttachMoney}
-                    color="primary.main"
-                />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <StatCard
-                    label="Pending"
-                    value={fmt(data.pending.sum)}
-                    sub={`${data.pending.count} payments`}
-                    Icon={HourglassEmpty}
-                    color="info.main"
-                />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <StatCard
-                    label="Failed"
-                    value={fmt(data.failed.sum)}
-                    sub={`${data.failed.count} payments`}
-                    Icon={Cancel}
-                    color="error.main"
-                />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                <StatCard
-                    label="Refunded"
-                    value={fmt(data.refunded.sum)}
-                    sub={`${data.refunded.count} payments`}
-                    Icon={Cancel}
-                    color="text.secondary"
-                />
+            <Grid size={12}>
+                <StatRow>
+                    <StatCard
+                        label="Gross Revenue"
+                        value={fmt(data.completed.sum)}
+                        sub={`${data.completed.count} completed payments`}
+                        color="success.main"
+                    />
+                    <StatCard
+                        label="Est. Stripe Fees"
+                        value={fmt(data.stripeFees)}
+                        sub="1.5% + €0.25 / txn (approx.)"
+                        color="warning.main"
+                    />
+                    <StatCard
+                        label="Platform Fee"
+                        value={fmt(data.platformFees)}
+                        sub={`${BRAND_NAME}'s own cut`}
+                        color="warning.main"
+                    />
+                    <StatCard
+                        label="Net Revenue"
+                        value={fmt(data.netRevenue)}
+                        sub="After estimated fees"
+                        color="primary.main"
+                    />
+                    <StatCard
+                        label="Pending"
+                        value={fmt(data.pending.sum)}
+                        sub={`${data.pending.count} payments`}
+                        color="info.main"
+                    />
+                    <StatCard
+                        label="Failed"
+                        value={fmt(data.failed.sum)}
+                        sub={`${data.failed.count} payments`}
+                        color="error.main"
+                    />
+                    <StatCard
+                        label="Refunded"
+                        value={fmt(data.refunded.sum)}
+                        sub={`${data.refunded.count} payments`}
+                        color="text.secondary"
+                    />
+                </StatRow>
             </Grid>
 
             {/* Recent payments table */}

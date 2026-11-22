@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma/prisma";
 import { notFound } from "next/navigation";
 import { canEditEvent, getEventViewer, visibleEventWhere } from "@/lib/events/public-event";
-import { calculateMaximumStaySurcharge, normalizeStayPolicy, resolveAccommodationHotels } from "@/lib/events/accommodation";
+import { calculateMaximumStaySurcharge, normalizeStayPolicy } from "@/lib/events/accommodation";
 import {
   Container,
   Box,
@@ -10,13 +10,9 @@ import {
   Paper,
   Stack,
   Button,
-  Divider,
-  Chip,
   Alert
 } from "@mui/material";
-import { 
-  AccessTime, 
-  ConfirmationNumber,
+import {
   Edit,
   Hotel,
   Palette
@@ -41,7 +37,7 @@ import PageLoadingState from "@/components/common/PageLoadingState";
 import { hasCheckInIdentity, hasBillingAddress } from "@/lib/user/profile-completion";
 import { AttendeeCard } from "./AttendeeCard";
 
-const eventDateFormatter = new Intl.DateTimeFormat("en-US");
+const eventDateFormatter = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
 
 export default function EventDetailPage({
   params,
@@ -153,13 +149,6 @@ async function EventDetailPageContent({
     event.startDate,
     event.endDate
   );
-  const accommodationHotels = resolveAccommodationHotels(
-    stayPolicy,
-    serializedProducts,
-    event.location?.name || event.name,
-    event.startDate,
-    event.endDate
-  );
   const maximumStaySurcharge = calculateMaximumStaySurcharge(
     stayPolicy,
     serializedProducts,
@@ -236,7 +225,7 @@ async function EventDetailPageContent({
       {/* Success Alert */}
       {message === 'update_success' && (
         <Container maxWidth="lg" sx={{ mt: 2 }}>
-          <Alert severity="success" sx={{ borderRadius: 2 }}>
+          <Alert severity="success">
             Your registration preferences have been updated successfully.
           </Alert>
         </Container>
@@ -244,7 +233,7 @@ async function EventDetailPageContent({
 
       {message === 'approval_pending' && (
         <Container maxWidth="lg" sx={{ mt: 2 }}>
-          <Alert severity="info" sx={{ borderRadius: 2 }}>
+          <Alert severity="info">
             Your registration has been submitted and is awaiting admin approval before payment.
           </Alert>
         </Container>
@@ -261,14 +250,14 @@ async function EventDetailPageContent({
       </EventSiteFrame>
 
       {/* Content */}
-      <Container maxWidth="lg" sx={{ py: 6 }}>
-        <Grid container spacing={6}>
+      <Container maxWidth="lg" sx={{ py: { xs: 3, md: 6 } }}>
+        <Grid container spacing={{ xs: 4, md: 6 }}>
           {/* Main Info */}
           <Grid size={{ xs: 12, md: 8 }}>
             <EventSiteFrame theme={theme} sx={{ p: { xs: 0, md: 1 } }}>
             <EventPageContent blocks={home.blocks} ctx={siteCtx} slots={{
               about: <Box>
-              <Typography variant="h4" gutterBottom fontWeight="bold">About this Event</Typography>
+              <Typography variant="h4" gutterBottom fontWeight="bold">About this event</Typography>
               <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', color: 'text.secondary', fontSize: '1.1rem' }}>
                 {event.description}
               </Typography>
@@ -325,33 +314,31 @@ async function EventDetailPageContent({
           </Grid>
 
           {/* Registration Sidebar */}
-          <Grid size={{ xs: 12, md: 4 }}>
-            <Stack spacing={3} sx={{ position: 'sticky', top: 100 }}>
-              <Paper elevation={4} sx={{ p: 4, borderRadius: 2 }}>
-                <Typography variant="h5" gutterBottom fontWeight="bold">Registration</Typography>
-                <Divider sx={{ mb: 3 }} />
-                
-                <Stack spacing={2} mb={4}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <AccessTime color="primary" />
-                    <Box>
-                      <Typography variant="subtitle2">Duration</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))} Days
-                      </Typography>
-                    </Box>
+          {/* Phones: the booking card comes first so the next action is not buried below the attendee list. */}
+          <Grid size={{ xs: 12, md: 4 }} order={{ xs: -1, md: 0 }}>
+            <Stack spacing={3} sx={{ position: { md: 'sticky' }, top: 100 }}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="overline" component="h2" color="text.secondary">Registration</Typography>
+                <Typography component="p" sx={{ fontFamily: "var(--font-display)", fontWeight: 600, fontSize: "2rem", lineHeight: 1.15, letterSpacing: "-0.01em" }}>
+                  {priceLabel || "No ticket prices listed"}
+                </Typography>
+                {maximumStaySurcharge > 0 && (
+                  <Typography variant="body2" color="text.secondary">+ optional hotel extras (up to {maximumStaySurcharge}€)</Typography>
+                )}
+                <Box component="dl" sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", m: 0, mt: 2.5, mb: 3, py: 1.5, borderBlock: "1px solid", borderColor: "divider" }}>
+                  <Box>
+                    <Typography component="dt" variant="caption" color="text.secondary">Duration</Typography>
+                    <Typography component="dd" sx={{ m: 0, fontWeight: 600 }}>
+                      {Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))} days
+                    </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <ConfirmationNumber color="primary" />
+                  {event.maxRegistrations && (
                     <Box>
-                      <Typography variant="subtitle2">Price Range</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {priceLabel || 'No ticket prices listed'}
-                        {maximumStaySurcharge > 0 && <Typography component="span" variant="caption" display="block">+ Optional Hotel Extras (up to {maximumStaySurcharge}€)</Typography>}
-                      </Typography>
+                      <Typography component="dt" variant="caption" color="text.secondary">Spots taken</Typography>
+                      <Typography component="dd" sx={{ m: 0, fontWeight: 600 }}>{event._count.registrations} / {event.maxRegistrations}</Typography>
                     </Box>
-                  </Box>
-                </Stack>
+                  )}
+                </Box>
 
                 {!hasTickets ? (
                   <Alert severity="info">No ticket or booking is required for this event.</Alert>
@@ -376,14 +363,13 @@ async function EventDetailPageContent({
                     <Button 
                       fullWidth 
                       variant="contained" 
-                      size="large" 
-                      sx={{ py: 2, fontSize: '1.1rem' }}
+                      size="large"
                       href={`/events/${event.id}/register`}
                       disabled={!!(event.registrationOpensAt && new Date(event.registrationOpensAt) > new Date()) || !!(event.maxRegistrations && event._count.registrations >= event.maxRegistrations)}
                     >
                       {event.maxRegistrations && event._count.registrations >= event.maxRegistrations 
-                        ? 'Registration Full' 
-                        : 'Register Now'}
+                        ? 'Registration full'
+                        : 'Register now'}
                     </Button>
 
                     {event.registrationOpensAt && new Date(event.registrationOpensAt) > new Date() && (
@@ -415,7 +401,7 @@ async function EventDetailPageContent({
                     href={`/admin/events/${event.id}`}
                     sx={{ mt: 2 }}
                   >
-                    Edit Event (Admin)
+                    Edit event
                   </Button>
                 )}
                 {canEdit && (
@@ -431,13 +417,6 @@ async function EventDetailPageContent({
                   </Button>
                 )}
 
-                {event.maxRegistrations && (
-                  <Box sx={{ mt: 2, textAlign: 'center' }}>
-                    <Typography variant="caption" color="text.secondary">
-                      {event._count.registrations} / {event.maxRegistrations} spots taken
-                    </Typography>
-                  </Box>
-                )}
               </Paper>
 
               {hasHotelRoom && (
@@ -453,17 +432,6 @@ async function EventDetailPageContent({
                 />
               )}
 
-              {hasTickets && <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="h6" gutterBottom>Includes</Typography>
-                <Stack direction="row" flexWrap="wrap" gap={1}>
-                  <Chip label="Badge" variant="outlined" />
-                  <Chip label="Event Access" variant="outlined" />
-                  <Chip label="Workshops" variant="outlined" />
-                  {accommodationHotels.length > 0 && (
-                    <Chip label="Hotel Support" variant="outlined" />
-                  )}
-                </Stack>
-              </Paper>}
             </Stack>
           </Grid>
         </Grid>

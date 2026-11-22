@@ -10,10 +10,12 @@ import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
+import Divider from "@mui/material/Divider";
 import { getCallbackPath } from "@/lib/auth/callback";
 import TextField from "@mui/material/TextField";
 import CircularProgress from "@mui/material/CircularProgress";
 import LastUsedIndicator from "./LastUsedIndicator";
+import { NotYetRegistered } from "./template";
 
 // All recognised status messages keyed by their URL param value.
 // Priority is determined by the order they are checked below.
@@ -304,19 +306,17 @@ export default function LoginPageClient() {
       {!linkRequired && (
         <Stack spacing={3}>
           <LoginForm callbackUrl={callbackUrl} captchaToken={captchaToken} resetCaptcha={resetCaptcha} />
-          <Typography variant="subtitle2" color="text.secondary" align="center">
-            Or
-          </Typography>
-          <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="center">
+          <Divider sx={{ color: "text.secondary", typography: "body2" }}>or continue with</Divider>
+          <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
             <LoginMethodBox>
-              <Button variant="outlined" color="secondary" disabled={turnstileEnabled && !captchaToken} onClick={() => void handleSocialSignIn("google")}>
-                Sign in with Google
+              <Button variant="outlined" fullWidth disabled={turnstileEnabled && !captchaToken} onClick={() => void handleSocialSignIn("google")}>
+                Google
               </Button>
               <LastUsedIndicator loginMethod="google" />
             </LoginMethodBox>
             <LoginMethodBox>
-              <Button variant="outlined" color="secondary" disabled={turnstileEnabled && !captchaToken} onClick={() => void handleSocialSignIn("github")}>
-                Sign in with GitHub
+              <Button variant="outlined" fullWidth disabled={turnstileEnabled && !captchaToken} onClick={() => void handleSocialSignIn("github")}>
+                GitHub
               </Button>
               <LastUsedIndicator loginMethod="github" />
             </LoginMethodBox>
@@ -324,6 +324,7 @@ export default function LoginPageClient() {
           <Typography variant="caption" color="text.secondary" align="center">
             A Passkey lets you sign in without a password. If you don&apos;t have one yet, create it.
           </Typography>
+          <NotYetRegistered />
         </Stack>
       )}
     </>
@@ -332,7 +333,7 @@ export default function LoginPageClient() {
 
 function LoginMethodBox({ children }: { children: React.ReactNode }) {
   return (
-    <Box sx={{ mt: 2, display: "flex", flexDirection: "column", gap: 2 }}>
+    <Box sx={{ flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
       {children}
     </Box>
   );

@@ -3,8 +3,6 @@ import type React from "react";
 import {
     Box,
     Typography,
-    Container,
-    Paper,
     Alert,
 } from "@mui/material";
 import Link from "next/link";
@@ -31,17 +29,8 @@ const AuthTemplate = ({
 }: AuthTemplateProps) => {
 
     return (
-        <Container component="main" maxWidth="sm">
-            <Paper 
-                elevation={3} 
-                sx={{ 
-                    p: 4, 
-                    mt: 8,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center'
-                }}
-            >                
+        // The page around it provides the sheet; nesting another paper here drew a card inside a card.
+        <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 {error && (
                     <Alert severity="error" sx={{ width: '100%', mb: 2 }}>
                         {error}
@@ -50,10 +39,9 @@ const AuthTemplate = ({
                 
                 {children}
                 
-                {form === "login" ? <NotYetRegistered /> : <AlreadyRegistered />}
+                {form === "register" && <AlreadyRegistered />}
                 {form === "login" && <ForgotPassword onClose={onClose} open={resetPasswordOpen} />}
-            </Paper>
-        </Container>
+        </Box>
     );
 };
 
@@ -72,7 +60,8 @@ const AlreadyRegistered = () => {
     );
 };
 
-const NotYetRegistered = () => {
+// Rendered by the login page after every sign-in method, so it is the last thing on the form.
+export const NotYetRegistered = () => {
     const callbackUrl = getCallbackPath(useSearchParams().get("callbackUrl"));
     return (
         <Box sx={{ mt: 3, textAlign: 'center', width: '100%' }}>

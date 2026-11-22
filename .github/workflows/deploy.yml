@@ -151,6 +151,7 @@ jobs:
             BETTER_AUTH_URL=${{ steps.target.outputs.better_auth_url }}
             NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${{ steps.target.outputs.stripe_publishable_key }}
             NEXT_PUBLIC_TURNSTILE_SITE_KEY=${{ steps.target.outputs.turnstile_site_key }}
+            NEXT_PUBLIC_BRAND_NAME=${{ matrix.server == 'venuva' && 'Venuva' || 'Ventry' }}
             NEXT_PUBLIC_GIT_COMMIT=${{ steps.build_metadata.outputs.commit }}
             NEXT_PUBLIC_GIT_TAG=${{ steps.build_metadata.outputs.tag }}
             NEXT_PUBLIC_BUILD_DATE=${{ steps.build_metadata.outputs.build_date }}

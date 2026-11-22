@@ -1,13 +1,10 @@
-import { 
-  Card, 
-  CardContent, 
-  Typography, 
-  Button, 
-  Box, 
-  Stack 
-} from '@mui/material';
-import { CalendarMonth, LocationOn } from '@mui/icons-material';
+'use client';
+
+import { Box, Typography } from '@mui/material';
+import { LocationOn } from '@mui/icons-material';
 import Image from 'next/image';
+import Link from 'next/link';
+import { kissCut } from '@/lib/ui/kissCut';
 
 interface EventCardProps {
   event: {
@@ -24,62 +21,75 @@ interface EventCardProps {
   priority?: boolean;
 }
 
+const month = (date: Date) => date.toLocaleDateString('en', { month: 'short' });
+const day = (date: Date) => date.toLocaleDateString('en', { day: 'numeric' });
+
+/** Day range for the sticker, e.g. "3" or "3–5"; spans across months fall back to the start day. */
+function dayRange(start: Date, end: Date) {
+  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+  return sameMonth && start.getDate() !== end.getDate() ? `${day(start)}–${day(end)}` : day(start);
+}
+
 export default function EventCard({ event, priority = false }: EventCardProps) {
-  const startDate = new Date(event.startDate);
-  const dateString = startDate.toLocaleDateString('en', { 
-    month: 'short', 
-    day: 'numeric', 
-    year: 'numeric' 
-  });
+  const start = new Date(event.startDate);
+  const end = new Date(event.endDate);
+  const fullDate = start.toLocaleDateString('en', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' });
 
   return (
-    <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
-      <Box sx={{ position: 'relative', pt: '56.25%' }}>
+    <Box
+      component={Link}
+      href={`/events/${event.id}`}
+      sx={{
+        display: 'flex', flexDirection: 'column', gap: 1.5, height: '100%', color: 'inherit', textDecoration: 'none', borderRadius: '16px',
+        '&:hover .event-card-photo img': { transform: 'scale(1.03)' },
+        '&:hover .event-card-date': { transform: 'rotate(-4deg) translateY(-2px)' },
+        '&:focus-visible': { outlineOffset: 4 },
+      }}
+    >
+      <Box className="event-card-photo" sx={{ position: 'relative', aspectRatio: '4 / 3', borderRadius: '16px', overflow: 'hidden', bgcolor: 'var(--liner)', border: '1px solid var(--rule)' }}>
         {event.imageUrl ? (
           <Image
             src={event.imageUrl}
-            alt={event.name}
+            alt=""
             fill
-            sizes="(min-width: 1200px) 33vw, (min-width: 600px) 50vw, 100vw"
+            sizes="(min-width: 1200px) 380px, (min-width: 600px) 50vw, 100vw"
             preload={priority}
-            loading={priority ? "eager" : "lazy"}
-            style={{ objectFit: 'cover' }}
+            loading={priority ? 'eager' : 'lazy'}
+            style={{ objectFit: 'cover', transition: 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)' }}
           />
         ) : (
-          <Box sx={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', bgcolor: 'grey.300', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography variant="h6" color="text.secondary">No Image</Typography>
+          <Box aria-hidden sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', backgroundImage: 'radial-gradient(var(--rule-strong) 1px, transparent 1px)', backgroundSize: '14px 14px' }}>
+            <Box sx={{ ...kissCut, width: 88, height: 88, borderRadius: '50%', bgcolor: 'background.paper', display: 'grid', placeItems: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '2.5rem', color: 'text.secondary' }}>
+              {event.name.trim()[0]?.toUpperCase()}
+            </Box>
           </Box>
         )}
-      </Box>
-      <CardContent sx={{ flexGrow: 1 }}>
-        <Typography gutterBottom variant="h5" component="div" noWrap>
-          {event.name}
-        </Typography>
-        
-        <Stack spacing={1} mb={2}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <CalendarMonth fontSize="small" color="action" />
-            <Typography variant="body2" color="text.secondary">
-              {dateString}
-            </Typography>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <LocationOn fontSize="small" color="action" />
-            <Typography variant="body2" color="text.secondary">
-              {event.location ? `${event.location.city}, ${event.location.country}` : 'Virtual / TBD'}
-            </Typography>
-          </Box>
-        </Stack>
-      </CardContent>
-      <Box sx={{ p: 2, pt: 0 }}>
-        <Button 
-          fullWidth 
-          variant="contained" 
-          href={`/events/${event.id}`}
+        <Box
+          className="event-card-date"
+          sx={{
+            ...kissCut, position: 'absolute', top: 12, left: 12, minWidth: 64, px: 1.25, py: 0.75, borderRadius: '12px',
+            bgcolor: 'background.paper', textAlign: 'center', lineHeight: 1, transform: 'rotate(-2deg)',
+            transition: 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
         >
-          View Details
-        </Button>
+          <Typography component="span" sx={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ink-tomato)' }}>
+            {month(start)}
+          </Typography>
+          <Typography component="span" sx={{ display: 'block', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.5rem', letterSpacing: '-0.02em' }}>
+            {dayRange(start, end)}
+          </Typography>
+        </Box>
       </Box>
-    </Card>
+      <Box sx={{ px: 0.5 }}>
+        <Typography variant="h5" component="h2" sx={{ overflowWrap: 'anywhere' }}>{event.name}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{fullDate}</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.25, color: 'text.secondary' }}>
+          <LocationOn sx={{ fontSize: 16 }} aria-hidden />
+          <Typography variant="body2">
+            {event.location ? `${event.location.city}, ${event.location.country}` : 'Location to be announced'}
+          </Typography>
+        </Box>
+      </Box>
+    </Box>
   );
 }

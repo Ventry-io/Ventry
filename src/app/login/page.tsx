@@ -1,6 +1,4 @@
 import Box from "@mui/material/Box";
-import Container from "@mui/material/Container";
-import Paper from "@mui/material/Paper";
 import Typography from "@mui/material/Typography";
 import LoginPageClient from "@/components/auth/LoginPageClient";
 import { getSession } from "@/lib/auth/session";
@@ -8,6 +6,8 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma/prisma";
 import { Suspense } from "react";
 import PageLoadingState from "@/components/common/PageLoadingState";
+import AuthSheet from "@/components/auth/AuthSheet";
+import { BRAND_NAME } from "@/lib/brand";
 
 export default function LoginPage({
   searchParams
@@ -52,33 +52,19 @@ async function LoginPageContent({
   }
 
   return (
-    <Container maxWidth="lg">
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          minHeight: "100vh",
-          py: 4,
-        }}
-      >
-        <Paper
-          elevation={0}
-          sx={{
-            width: "100%",
-            maxWidth: 600,
-            display: "flex",
-            flexDirection: "column",
-            p: { xs: 2, md: 4 },
-          }}
-        >
-          <Typography component="h1" variant="h4" align="center" sx={{ mt: 2, mb: 3 }}>
-            Login
+    <Box sx={{ flex: 1, display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(0, 5fr) minmax(0, 6fr)" } }}>
+      <AuthSheet />
+      <Box sx={{ display: "flex", justifyContent: "center", px: 2, py: { xs: 4, md: 8 } }}>
+        <Box sx={{ width: "100%", maxWidth: 460 }}>
+          <Typography component="h1" variant="h3" sx={{ mb: 1 }}>
+            Log in
           </Typography>
-          
+          <Typography color="text.secondary" sx={{ mb: 3 }}>
+            Welcome back to {BRAND_NAME}. Your tickets, rooms and events are waiting.
+          </Typography>
           <LoginPageClient />
-        </Paper>
+        </Box>
       </Box>
-    </Container>
+    </Box>
   );
 }

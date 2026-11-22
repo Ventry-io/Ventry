@@ -9,6 +9,9 @@ import Avatar from "@mui/material/Avatar";
 import IconButton from "@mui/material/IconButton";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Chip from "@mui/material/Chip";
+import { kissCut } from "@/lib/ui/kissCut";
+import { BRAND_NAME } from "@/lib/brand";
 import Link from "next/link";
 import { useSession } from "@/lib/auth/client";
 import { usePathname } from "next/navigation";
@@ -23,7 +26,7 @@ type ProfilePictureResponse = { profilePictures?: ProfilePictureEntry[] };
  *
  * - Fades out (slides up) when the user scrolls down.
  * - Fades back in when the user scrolls up.
- * - Left: "Ventry" typography brand link → homepage.
+ * - Left: sticker mark plus the deployment's brand name (BRAND_NAME) → homepage.
  * - Right: login/logout button plus profile avatar icon (when signed in) → /profile.
  */
 export default function AppHeader() {
@@ -146,60 +149,45 @@ export default function AppHeader() {
     return (
         <AppBar
             position="sticky"
-            elevation={1}
             sx={{
                 zIndex: theme => theme.zIndex.drawer + 1,
                 top: 0,
                 left: 0,
                 right: 0,
                 transform: visible ? "translateY(0)" : "translateY(-100%)",
-                opacity: visible ? 1 : 0,
-                transition: "transform 0.3s ease, opacity 0.3s ease",
-                bgcolor: "background.paper",
+                transition: "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
                 color: "text.primary",
-                backdropFilter: "blur(8px)",
             }}
         >
-            <Toolbar sx={{ justifyContent: "space-between" }}>
-                {/* Brand */}
-                
-                <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-
-                    <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>
-                        <Typography
-                            variant="h5"
-                            component="span"
-                            fontWeight={700}
-                            letterSpacing={2}
-                            sx={{
-                                userSelect: "none",
-                                "&:hover": { opacity: 0.8 },
-                                transition: "opacity 0.2s",
-                            }}
-                            >
-                            Ventry
+            <Toolbar sx={{ justifyContent: "space-between", gap: 2, minHeight: { xs: 60, sm: 64 } }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0 }}>
+                    <Box component={Link} href="/" sx={{ display: "inline-flex", alignItems: "center", gap: 1.25, color: "inherit", textDecoration: "none", borderRadius: 2 }}>
+                        <Box aria-hidden sx={{ ...kissCut, width: 32, height: 32, borderRadius: "50%", bgcolor: "var(--ink-teal)", color: "background.paper", display: "grid", placeItems: "center", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1rem", flexShrink: 0 }}>
+                            {BRAND_NAME[0]}
+                        </Box>
+                        <Typography component="span" sx={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: "1.375rem", letterSpacing: "-0.01em", userSelect: "none" }}>
+                            {BRAND_NAME}
                         </Typography>
-                    </Link>
+                    </Box>
 
                     {user?.isAdmin && (
-                        <Link href={isInAdminArea ? "/" : "/admin"} aria-label={isInAdminArea ? "Leave admin area" : "Admin"} style={{ textDecoration: "none" }}>
-                            <Typography
-                                variant="h6"
-                                sx={{ color: "#f50057", fontWeight: "bold", "&:hover": { opacity: 0.8 }, transition: "opacity 0.2s", boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)" }}
-                            >
-                                {isInAdminArea ? <><Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>← Leave admin area</Box><Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>Site</Box></> : "Admin"}
-                            </Typography>
-                        </Link>
+                        <Chip
+                            component={Link}
+                            href={isInAdminArea ? "/" : "/admin"}
+                            clickable
+                            color="secondary"
+                            size="small"
+                            aria-label={isInAdminArea ? "Leave admin area" : "Admin"}
+                            label={isInAdminArea ? <><Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>Leave admin area</Box><Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>Site</Box></> : "Admin"}
+                        />
                     )}
                 </Box>
-                
 
-                {/* Right side */}
-                 <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
                     {!isOnLoginOrLogout && <Button
                         component={Link}
                         href={user ? "/logout" : "/login"}
-                        variant="outlined"
+                        variant={user ? "text" : "contained"}
                         size="small"
                     >
                         {user ? "Logout" : "Login"}
@@ -209,11 +197,11 @@ export default function AppHeader() {
 
                     {user ? (
                         <Link href="/profile" style={{ textDecoration: "none" }}>
-                            <IconButton size="small" sx={{ p: 0 }} aria-label="Go to profile">
+                            <IconButton size="small" sx={{ p: 0, borderRadius: "50%" }} aria-label="Go to profile">
                                 <Avatar
                                     alt={user.name ?? "Profile"}
                                     src={profileImageUrl ?? undefined}
-                                    sx={{ width: 36, height: 36, fontSize: "0.875rem" }}
+                                    sx={{ width: 38, height: 38, fontSize: "0.875rem", bgcolor: "var(--ink-grape)", color: "background.paper" }}
                                 >
                                     {!profileImageUrl && initials}
                                 </Avatar>

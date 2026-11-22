@@ -1,21 +1,15 @@
 import { withEventScope } from "@/lib/events/admin-context";
 import { Suspense } from "react";
-import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
 import Box from "@mui/material/Box";
 import Skeleton from "@mui/material/Skeleton";
-import Divider from "@mui/material/Divider";
+import Button from "@mui/material/Button";
+import Stack from "@mui/material/Stack";
 import Alert from "@mui/material/Alert";
 import AlertTitle from "@mui/material/AlertTitle";
-import {
-    People,
-    VerifiedUser,
-    ConfirmationNumber,
-    SupportAgent,
-    Event,
-    AttachMoney,
-} from "@mui/icons-material";
-import StatCard from "@/components/admin/StatCard/StatCard";
+import StatCard, { StatRow } from "@/components/admin/StatCard/StatCard";
+import EventLifecycleStrip from "@/components/admin/EventLifecycle/EventLifecycleStrip";
+import { eventStage } from "@/lib/events/lifecycle";
 import { prisma } from "@/lib/prisma/prisma";
 import { checkAdminAuth, adminEventFilter, getAdminFinanceAccess } from "@/lib/auth/admin";
 import { redirect } from "next/navigation";
@@ -30,9 +24,9 @@ async function getDashboardStats(adminId: string, eventId: string, orgScope?: st
     const [
         totalRegistrants,
         verifiedRegistrants,
+        checkedIn,
         totalTickets,
         openTickets,
-        eventsByStatus,
         revenue,
     ] = await Promise.all([
         // Unique users registered to this admin's events
@@ -48,17 +42,13 @@ async function getDashboardStats(adminId: string, eventId: string, orgScope?: st
                 user: { emailVerified: true },
             },
         }).then((rows) => rows.length),
+        prisma.registration.count({ where: { event: eventFilter, checkedInAt: { not: null } } }),
         prisma.supportTicket.count({ where: { event: eventFilter } }),
         prisma.supportTicket.count({
             where: {
                 event: eventFilter,
                 status: { in: ["OPEN", "IN_PROGRESS"] },
             },
-        }),
-        prisma.event.groupBy({
-            by: ["status"],
-            where: eventFilter,
-            _count: { _all: true },
         }),
         financeAccess.eventFilter ? prisma.payment.aggregate({
             _sum: { amount: true },
@@ -69,123 +59,87 @@ async function getDashboardStats(adminId: string, eventId: string, orgScope?: st
         }) : null,
     ]);
 
-    const eventCounts = Object.fromEntries(
-        eventsByStatus.map((e) => [e.status, e._count._all])
-    ) as Record<string, number>;
-
     return {
         totalRegistrants,
         verifiedRegistrants,
+        checkedIn,
         totalTickets,
         openTickets,
-        draftEvents: eventCounts.DRAFT ?? 0,
-        publishedEvents: eventCounts.PUBLISHED ?? 0,
-        cancelledEvents: eventCounts.CANCELLED ?? 0,
         totalRevenue: revenue ? revenue._sum.amount ?? 0 : null,
         hasRestrictedFinances: financeAccess.hasRestrictedOrganizations,
     };
 }
 
-function StatSkeleton() {
+async function DashboardHeader({ adminId, orgScope, eventId }: { adminId: string; orgScope?: string; eventId: string }) {
+    // Same access filter as the stats, so the header never names an event this admin cannot see.
+    const event = await prisma.event.findFirst({
+        where: withEventScope(await adminEventFilter(adminId, orgScope), eventId),
+        select: { id: true, name: true, status: true, publishAt: true, registrationOpensAt: true, startDate: true, endDate: true, location: { select: { city: true } } },
+    });
+    if (!event) return <Typography variant="h3" component="h1" sx={{ mb: 3 }}>Dashboard</Typography>;
+    const dates = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" });
     return (
-        <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-            <Skeleton variant="rounded" height={110} />
-        </Grid>
+        <Box sx={{ mb: 3, display: "flex", flexDirection: "column", gap: 2.5 }}>
+            <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between", gap: 2 }}>
+                <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="h3" component="h1">{event.name}</Typography>
+                    <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+                        {[event.location?.city, `${dates.format(event.startDate)} – ${dates.format(event.endDate)}`].filter(Boolean).join(" · ")}
+                    </Typography>
+                </Box>
+                <Stack direction="row" flexWrap="wrap" gap={1}>
+                    <Button variant="outlined" href={`/events/${event.id}`}>View public page</Button>
+                    <Button variant="contained" href={`/admin/events/${event.id}/check-in`}>Open check-in</Button>
+                </Stack>
+            </Box>
+            <EventLifecycleStrip stage={eventStage(event)} />
+        </Box>
     );
 }
 
 async function DashboardStats({ adminId, orgScope, eventId }: { adminId: string; orgScope?: string; eventId: string }) {
     const stats = await getDashboardStats(adminId, eventId, orgScope);
-    const verifiedPct = stats.totalRegistrants
-        ? Math.round((stats.verifiedRegistrants / stats.totalRegistrants) * 100)
-        : 0;
+    const pct = (part: number) => stats.totalRegistrants ? Math.round((part / stats.totalRegistrants) * 100) : 0;
 
     return (
-        <>
-            {/* Registrants */}
-            <Grid size={12}>
-                <Typography variant="h6" fontWeight={600} color="text.secondary">Registrants</Typography>
-                <Divider sx={{ mt: 0.5, mb: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                <StatCard label="Total Registrants" value={stats.totalRegistrants} Icon={People} color="primary.main" />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+        <Stack spacing={2}>
+            <StatRow>
                 <StatCard
-                    label="Verified Registrants"
-                    value={stats.verifiedRegistrants}
-                    sub={`${verifiedPct}% of registrants`}
-                    Icon={VerifiedUser}
+                    label="Registrants"
+                    value={stats.totalRegistrants}
+                    sub={`${stats.verifiedRegistrants} verified · ${pct(stats.verifiedRegistrants)}%`}
+                />
+                <StatCard
+                    label="Checked in"
+                    value={stats.checkedIn}
+                    sub={`${pct(stats.checkedIn)}% of registrants`}
                     color="success.main"
                 />
-            </Grid>
-
-            {/* Support Tickets */}
-            <Grid size={12}>
-                <Typography variant="h6" fontWeight={600} color="text.secondary" sx={{ mt: 2 }}>Support Tickets</Typography>
-                <Divider sx={{ mt: 0.5, mb: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                <StatCard label="Total Tickets" value={stats.totalTickets} Icon={ConfirmationNumber} />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
                 <StatCard
-                    label="Open / In Progress"
+                    label="Open support tickets"
                     value={stats.openTickets}
-                    Icon={SupportAgent}
+                    sub={`${stats.totalTickets} total`}
                     color={stats.openTickets > 0 ? "warning.main" : "success.main"}
                 />
-            </Grid>
-
-            {/* Events */}
-            <Grid size={12}>
-                <Typography variant="h6" fontWeight={600} color="text.secondary" sx={{ mt: 2 }}>Events</Typography>
-                <Divider sx={{ mt: 0.5, mb: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                <StatCard label="Draft" value={stats.draftEvents} Icon={Event} color="text.secondary" />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                <StatCard label="Published" value={stats.publishedEvents} Icon={Event} color="primary.main" />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                <StatCard label="Cancelled" value={stats.cancelledEvents} Icon={Event} color="error.main" />
-            </Grid>
-
-            {/* Revenue */}
-            <Grid size={12}>
-                <Typography variant="h6" fontWeight={600} color="text.secondary" sx={{ mt: 2 }}>Revenue</Typography>
-                <Divider sx={{ mt: 0.5, mb: 2 }} />
-            </Grid>
+                <StatCard
+                    label="Revenue (completed)"
+                    value={stats.totalRevenue === null ? "—" : `€ ${stats.totalRevenue.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    sub={stats.totalRevenue === null ? "Finance access required" : "See Billing for full breakdown"}
+                    color={stats.totalRevenue === null ? "text.disabled" : "success.main"}
+                />
+            </StatRow>
             {stats.totalRevenue === null ? (
-                <Grid size={12}>
-                    <Alert severity="info">
-                        <AlertTitle>Finance access required</AlertTitle>
-                        You don’t have access to this organization’s finances. Ask the organization owner to grant you the Finances permission.
-                    </Alert>
-                </Grid>
-            ) : (
-                <>
-                    {stats.hasRestrictedFinances && (
-                        <Grid size={12}>
-                            <Alert severity="info">
-                                Some organization finances are hidden because you don’t have the Finances permission.
-                                Revenue below includes only events whose finances you can access. Ask the organization owner for access.
-                            </Alert>
-                        </Grid>
-                    )}
-                    <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
-                        <StatCard
-                            label="Total Revenue (completed)"
-                            value={`€ ${stats.totalRevenue.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                            Icon={AttachMoney}
-                            color="success.main"
-                            sub="See Billing for full breakdown"
-                        />
-                    </Grid>
-                </>
+                <Alert severity="info">
+                    <AlertTitle>Finance access required</AlertTitle>
+                    You don’t have access to this organization’s finances. Ask the organization owner to grant you the Finances permission.
+                </Alert>
+            ) : stats.hasRestrictedFinances && (
+                <Alert severity="info">
+                    Some organization finances are hidden because you don’t have the Finances permission.
+                    Revenue above includes only events whose finances you can access. Ask the organization owner for access.
+                </Alert>
             )}
-        </>
+        </Stack>
     );
 }
 
@@ -208,19 +162,12 @@ export default async function AdminDashboardPage({ searchParams }: Props) {
 
     return (
         <Box>
-            <Typography variant="h4" fontWeight={700} gutterBottom>
-                Dashboard
-            </Typography>
-            <Grid container spacing={2} alignItems="stretch">
-                <Suspense
-                    fallback={Array.from({ length: 7 }).map((_, i) => (
-                        // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton list
-                        <StatSkeleton key={i} />
-                    ))}
-                >
-                    <DashboardStats key={eventId} eventId={eventId} adminId={auth.adminId} orgScope={orgFilter} />
-                </Suspense>
-            </Grid>
+            <Suspense fallback={<Skeleton variant="rounded" height={120} sx={{ mb: 3 }} />}>
+                <DashboardHeader key={eventId} eventId={eventId} adminId={auth.adminId} orgScope={orgFilter} />
+            </Suspense>
+            <Suspense fallback={<Skeleton variant="rounded" height={160} />}>
+                <DashboardStats key={eventId} eventId={eventId} adminId={auth.adminId} orgScope={orgFilter} />
+            </Suspense>
         </Box>
     );
 }

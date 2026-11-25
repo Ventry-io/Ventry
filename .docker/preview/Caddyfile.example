@@ -1,0 +1,29 @@
+# Wildcard routing for PR previews. Add to the existing Caddy config on the preview server.
+# Requirements (docs/pr-previews.md):
+#   - DNS: *.dev.venuva.dog -> this server (A/AAAA).
+#   - A wildcard certificate needs the DNS-01 challenge, so Caddy must be built with your DNS provider's
+#     module (example: caddy-dns/cloudflare) and get an API token limited to that zone.
+#   - Caddy is attached to the ventry-previews network: docker network connect ventry-previews <caddy-container>
+#
+# Upstream names are derived from digits only, so a request can never pick an arbitrary upstream.
+*.dev.venuva.dog {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+
+	@preview header_regexp pr Host ^pr-([1-9][0-9]{0,6})\.dev\.venuva\.dog$
+	handle @preview {
+		# Captured preview emails, behind Mailpit basic auth.
+		handle /_mail/* {
+			reverse_proxy ventry-pr-{re.pr.1}-mail:8025
+		}
+		handle {
+			# Caddy sets X-Forwarded-For/-Proto/-Host and keeps Host, which Next.js and Better Auth rely on.
+			reverse_proxy ventry-pr-{re.pr.1}-app:3000
+		}
+	}
+
+	handle {
+		respond "No such preview" 404
+	}
+}

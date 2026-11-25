@@ -1,0 +1,84 @@
+name: PR Preview Cleanup
+
+# Removes a PR's preview when the PR is closed (merged or not), and once a day removes previews and images of
+# PRs that are no longer open (missed events, interrupted jobs). See docs/pr-previews.md.
+#
+# pull_request_target runs this file from the default branch with access to secrets, so it must never check out
+# or run PR code. It only uses the PR number from the event.
+
+on:
+  pull_request_target:
+    types:
+      - closed
+    branches:
+      - dev
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  cleanup:
+    # Runs whenever a preview server is configured, also while new deploys are switched off (PREVIEW_ENABLED).
+    if: vars.PREVIEW_DEPLOY_HOST != ''
+    runs-on: ubuntu-latest
+    # No reviewers (cleanup must not wait), but "main" as the only deployment branch. Its SSH key can only destroy/reconcile.
+    environment:
+      name: preview-cleanup
+      deployment: false
+    # Same group as deploy-preview: closing a PR cancels a deploy that is still waiting or running for it.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request_target' && format('pr-preview-{0}', github.event.pull_request.number) || 'pr-preview-reconcile' }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      TARGET: ${{ vars.PREVIEW_DEPLOY_USER }}@${{ vars.PREVIEW_DEPLOY_HOST }}
+      REPOSITORY: ${{ vars.PREVIEW_IMAGE_REPOSITORY || 'ventry-preview/app' }}
+      HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
+      HARBOR_USER: ${{ secrets.PREVIEW_HARBOR_USER }}
+      HARBOR_PASSWORD: ${{ secrets.PREVIEW_HARBOR_PASSWORD }}
+
+    steps:
+      - name: Check out cleanup scripts (default branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.PREVIEW_CLEANUP_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.PREVIEW_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/preview_cleanup
+          chmod 600 ~/.ssh/preview_cleanup
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Remove the closed PR's preview
+        if: github.event_name == 'pull_request_target'
+        run: |
+          [[ "$PR" =~ ^[1-9][0-9]*$ ]] || { echo "unexpected PR number" >&2; exit 1; }
+          ssh -i ~/.ssh/preview_cleanup -o IdentitiesOnly=yes -o BatchMode=yes "$TARGET" "destroy $PR"
+          node .github/scripts/harbor-preview-prune.mjs "$REPOSITORY" --pr "$PR" --keep 0
+          for id in $(gh api "repos/$REPO/deployments?environment=preview&task=preview:pr-$PR&per_page=100" --jq '.[].id'); do
+            gh api -X POST "repos/$REPO/deployments/$id/statuses" -f state=inactive -f description="PR closed; preview removed" >/dev/null
+          done
+
+      - name: Reconcile previews with open PRs
+        if: github.event_name != 'pull_request_target'
+        run: |
+          set -o pipefail
+          # Fails the job (and destroys nothing) if the API call fails.
+          open="$(gh api --paginate "repos/$REPO/pulls?state=open&base=dev&per_page=100" --jq '.[].number' | sort -n)"
+          echo "Open dev PRs: ${open:-none}"
+          ssh -i ~/.ssh/preview_cleanup -o IdentitiesOnly=yes -o BatchMode=yes "$TARGET" "reconcile $(paste -sd' ' <<<"$open")"
+          node .github/scripts/harbor-preview-prune.mjs "$REPOSITORY" --open "$(paste -sd, <<<"$open")"

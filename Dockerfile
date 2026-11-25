@@ -31,6 +31,23 @@ ENV DATABASE_URL="postgresql://dummy:dummy@localhost/dummy"
 ENV BETTER_AUTH_SECRET="build-placeholder"
 RUN npx prisma generate && npm run build:docker
 
+# One-off `prisma migrate deploy` image for PR previews (built with --target migrate).
+# It sits before `runner` so the default target is unchanged.
+FROM base AS migrate
+WORKDIR /app
+COPY package-lock.json /tmp/package-lock.json
+# shortcut: pins prisma and dotenv to the lockfile versions but resolves their own dependencies fresh; switch to a pruned `npm ci` if that drift ever matters.
+RUN apk add --no-cache openssl \
+  && echo '{"private":true,"type":"module"}' > package.json \
+  && npm install --no-audit --no-fund \
+    "prisma@$(node -p "require('/tmp/package-lock.json').packages['node_modules/prisma'].version")" \
+    "dotenv@$(node -p "require('/tmp/package-lock.json').packages['node_modules/dotenv'].version")" \
+  && rm /tmp/package-lock.json && npm cache clean --force
+COPY prisma ./prisma
+COPY prisma.config.ts ./
+USER node
+CMD ["npx", "--no-install", "prisma", "migrate", "deploy"]
+
 FROM base AS runner
 WORKDIR /app
 # pg_isready for the PostgreSQL availability check in /api/health.

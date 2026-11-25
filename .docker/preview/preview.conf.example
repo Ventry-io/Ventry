@@ -1,0 +1,16 @@
+# Server settings for preview.sh. Copy to <preview root>/preview.conf (sourced by bash, keep it admin-owned).
+
+# Previews are served at https://pr-<n>.<PREVIEW_DOMAIN>. Must match the PREVIEW_DOMAIN GitHub variable.
+PREVIEW_DOMAIN=dev.venuva.dog
+
+# Harbor repository for preview images (a dedicated project, never the dev/main one). Must match the
+# PREVIEW_IMAGE_REPOSITORY GitHub variable, prefixed with the registry host.
+PREVIEW_IMAGE=harbor.m-loeffler.de/ventry-preview/app
+
+# Docker network shared by Caddy and the previews. Create it once: docker network create ventry-previews
+PREVIEW_NETWORK=ventry-previews
+
+# Per-preview limits (Docker units).
+PREVIEW_APP_CPUS=1.0
+PREVIEW_APP_MEMORY=768m
+PREVIEW_POSTGRES_MEMORY=256m

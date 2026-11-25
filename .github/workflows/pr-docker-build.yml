@@ -1,5 +1,15 @@
 name: PR Docker Build
 
+# Builds the Docker image of every dev PR after PR Tests pass and, when previews are enabled, deploys
+# approved commits to https://pr-<n>.<PREVIEW_DOMAIN>. Design and setup: docs/pr-previews.md.
+#
+# Trust boundaries (workflow_run always runs this file from the default branch, never the PR's copy):
+# - resolve:        no PR code, read-only token.
+# - docker-build:   builds the PR head commit inside BuildKit; no secrets, read-only token, no shared caches.
+# - deploy-preview: secrets only after a maintainer approves this run in the `preview-deploy` environment
+#                   (one approval per run, so per commit). Never checks out or executes PR code; it only
+#                   pushes the image built above and asks the server to run it.
+
 on:
   workflow_run:
     workflows:
@@ -7,31 +17,87 @@ on:
     types:
       - completed
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  docker-build:
+  resolve:
     if: |
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.pull_requests[0].base.ref == 'dev'
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      pr: ${{ steps.pr.outputs.pr }}
+      preview: ${{ steps.pr.outputs.preview }}
+      reason: ${{ steps.pr.outputs.reason }}
+    steps:
+      - name: Find the open dev PR for the tested commit
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PREVIEW_ENABLED: ${{ vars.PREVIEW_ENABLED }}
+        run: |
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "unexpected head SHA" >&2; exit 1; }
+          # workflow_run.pull_requests is empty for fork PRs, so look the PR up by its head commit.
+          pr="$(gh api --paginate "repos/$REPO/pulls?state=open&base=dev&per_page=100" \
+            --jq ".[] | select(.head.sha == \"$HEAD_SHA\") | [.number, .draft, .user.type] | @tsv" | sort -n | head -n1)"
+          if [[ -z "$pr" ]]; then
+            echo "No open dev PR has head $HEAD_SHA; nothing to build."
+            exit 0
+          fi
+          IFS=$'\t' read -r number draft user_type <<<"$pr"
+          echo "pr=$number" >> "$GITHUB_OUTPUT"
+
+          reason=""
+          if [[ "$PREVIEW_ENABLED" != "true" ]]; then reason="previews are disabled (PREVIEW_ENABLED)"
+          elif [[ "$draft" == "true" ]]; then reason="draft PR"
+          elif [[ "$user_type" == "Bot" ]]; then reason="bot PR"
+          fi
+          if [[ -z "$reason" ]]; then
+            echo "preview=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "preview=false" >> "$GITHUB_OUTPUT"
+            echo "reason=$reason" >> "$GITHUB_OUTPUT"
+            echo "No preview for PR #$number: $reason."
+          fi
+
+  docker-build:
+    needs: resolve
+    if: needs.resolve.outputs.pr != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PREVIEW: ${{ needs.resolve.outputs.preview }}
+      PREVIEW_URL: https://pr-${{ needs.resolve.outputs.pr }}.${{ vars.PREVIEW_DOMAIN || 'dev.venuva.dog' }}
 
     steps:
+      # The exact tested commit, not refs/pull/<n>/merge, which can move to newer code after the run started.
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          ref: refs/pull/${{ github.event.workflow_run.pull_requests[0].number }}/merge
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
 
       - name: Resolve build metadata
         id: build_metadata
+        env:
+          STRIPE_KEY: ${{ vars.PREVIEW_STRIPE_PUBLISHABLE_KEY }}
         run: |
           tag="$(git describe --tags --abbrev=0 2>/dev/null || node -p "'v' + JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
 
           echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "build_date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+          # Previews bake their own URL (Server Actions origins) and only a Stripe test-mode key.
+          if [[ -n "$STRIPE_KEY" && "$STRIPE_KEY" != pk_test_* ]]; then
+            echo "PREVIEW_STRIPE_PUBLISHABLE_KEY must be a pk_test_ key" >&2
+            exit 1
+          fi
+          echo "stripe_key=${STRIPE_KEY}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -41,9 +107,230 @@ jobs:
         with:
           context: .
           push: false
+          outputs: ${{ env.PREVIEW == 'true' && format('type=docker,dest={0}/preview-app.tar', runner.temp) || '' }}
+          tags: preview-app:${{ github.event.workflow_run.head_sha }}
           build-args: |
-            BETTER_AUTH_URL=https://dev-ventry.m-loeffler.de
-            NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
+            BETTER_AUTH_URL=${{ env.PREVIEW_URL }}
+            NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${{ steps.build_metadata.outputs.stripe_key }}
             NEXT_PUBLIC_GIT_COMMIT=${{ steps.build_metadata.outputs.commit }}
             NEXT_PUBLIC_GIT_TAG=${{ steps.build_metadata.outputs.tag }}
             NEXT_PUBLIC_BUILD_DATE=${{ steps.build_metadata.outputs.build_date }}
+
+      - name: Build migration image
+        if: env.PREVIEW == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrate
+          push: false
+          outputs: type=docker,dest=${{ runner.temp }}/preview-migrate.tar
+          tags: preview-migrate:${{ github.event.workflow_run.head_sha }}
+
+      - name: Upload preview images
+        if: env.PREVIEW == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-images
+          path: |
+            ${{ runner.temp }}/preview-app.tar
+            ${{ runner.temp }}/preview-migrate.tar
+          retention-days: 3
+          if-no-files-found: error
+
+  announce-preview:
+    needs: [resolve, docker-build]
+    if: needs.resolve.outputs.preview == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: write
+    steps:
+      - name: Mark the preview as waiting for approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" -f context=preview -f state=pending \
+            -f description="Waiting for a maintainer to approve this commit for a preview" -f target_url="$RUN_URL" >/dev/null
+
+  deploy-preview:
+    name: Deploy preview for PR #${{ needs.resolve.outputs.pr }} at ${{ github.event.workflow_run.head_sha }}
+    needs: [resolve, docker-build]
+    if: needs.resolve.outputs.preview == 'true'
+    runs-on: ubuntu-latest
+    # Required reviewers + "main" as the only deployment branch: pull_request runs and branch pushes can never read these secrets.
+    environment:
+      name: preview-deploy
+      deployment: false
+    # Shared with the cleanup workflow. A newer commit cancels a run that is still waiting for approval; the server
+    # serializes per PR and rejects older generations, so a cancelled in-flight deploy cannot win.
+    concurrency:
+      group: pr-preview-${{ needs.resolve.outputs.pr }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      actions: read
+      deployments: write
+      statuses: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ needs.resolve.outputs.pr }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+      GENERATION: ${{ github.event.workflow_run.id }}
+      PREVIEW_URL: https://pr-${{ needs.resolve.outputs.pr }}.${{ vars.PREVIEW_DOMAIN || 'dev.venuva.dog' }}
+      IMAGE: ${{ secrets.HARBOR_REGISTRY }}/${{ vars.PREVIEW_IMAGE_REPOSITORY || 'ventry-preview/app' }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Confirm the approved commit is still the PR head
+        id: guard
+        run: |
+          read -r state head base <<<"$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha, .base.ref] | @tsv')"
+          if [[ "$state" != "open" || "$head" != "$SHA" || "$base" != "dev" ]]; then
+            echo "PR #$PR moved on (state=$state, head=$head, base=$base); not deploying $SHA."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out deployment scripts (default branch, never PR code)
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Create GitHub deployment
+        id: deployment
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          id="$(jq -n --arg sha "$SHA" --arg pr "$PR" '{
+              ref: $sha, environment: "preview", task: ("preview:pr-" + $pr), auto_merge: false,
+              required_contexts: [], transient_environment: true, production_environment: false,
+              description: ("Preview for PR #" + $pr)
+            }' | gh api -X POST "repos/$REPO/deployments" --input - --jq .id)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          gh api -X POST "repos/$REPO/deployments/$id/statuses" -f state=in_progress -f log_url="$RUN_URL" >/dev/null
+
+      - name: Download preview images
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: preview-images
+          path: ${{ runner.temp }}/images
+
+      - name: Log in to Harbor
+        if: steps.guard.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.HARBOR_REGISTRY }}
+          username: ${{ secrets.PREVIEW_HARBOR_USER }}
+          password: ${{ secrets.PREVIEW_HARBOR_PASSWORD }}
+
+      - name: Push immutable preview images
+        id: push
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          IMAGES: ${{ runner.temp }}/images
+        run: |
+          tag="pr-${PR}-${SHA:0:12}"
+          docker load -q -i "$IMAGES/preview-app.tar"
+          docker load -q -i "$IMAGES/preview-migrate.tar"
+          docker tag "preview-app:$SHA" "$IMAGE:$tag"
+          docker tag "preview-migrate:$SHA" "$IMAGE:$tag-migrate"
+          docker push -q "$IMAGE:$tag"
+          docker push -q "$IMAGE:$tag-migrate"
+          # The registry's digest is what the server pulls, so ask the registry rather than the local image store.
+          digest() { docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$1"; }
+          app="$(digest "$IMAGE:$tag")"
+          migrate="$(digest "$IMAGE:$tag-migrate")"
+          [[ "$app" =~ ^sha256:[0-9a-f]{64}$ && "$migrate" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "could not read pushed digests" >&2; exit 1; }
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "migrate=$migrate" >> "$GITHUB_OUTPUT"
+
+      - name: Configure SSH
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          SSH_KEY: ${{ secrets.PREVIEW_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.PREVIEW_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/preview_deploy
+          chmod 600 ~/.ssh/preview_deploy
+          # Pinned host key; no trust-on-first-use.
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy on the preview server
+        id: deploy
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          TARGET: ${{ vars.PREVIEW_DEPLOY_USER }}@${{ vars.PREVIEW_DEPLOY_HOST }}
+          APP_DIGEST: ${{ steps.push.outputs.app }}
+          MIGRATE_DIGEST: ${{ steps.push.outputs.migrate }}
+        run: |
+          # The key is pinned to `preview.sh --ssh deploy` on the server; this is its argument list, not a shell command.
+          set +e
+          ssh -i ~/.ssh/preview_deploy -o IdentitiesOnly=yes -o BatchMode=yes -o ServerAliveInterval=30 "$TARGET" \
+            "deploy $PR $SHA $APP_DIGEST $MIGRATE_DIGEST $GENERATION"
+          code=$?
+          set -e
+          if [[ $code -eq 3 ]]; then
+            echo "A newer commit of PR #$PR is already live; this run was superseded."
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          exit $code
+
+      - name: Verify the preview over HTTPS
+        if: steps.guard.outputs.skip != 'true' && steps.deploy.outputs.superseded != 'true'
+        run: |
+          for _ in $(seq 1 18); do
+            if curl --fail --silent --show-error --max-time 15 "$PREVIEW_URL/api/health" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Preview health check failed for $PREVIEW_URL/api/health (check DNS, Caddy and the container)" >&2
+          exit 1
+
+      - name: Prune older preview images
+        if: steps.guard.outputs.skip != 'true' && steps.deploy.outputs.superseded != 'true'
+        continue-on-error: true
+        env:
+          HARBOR_REGISTRY: ${{ secrets.HARBOR_REGISTRY }}
+          HARBOR_USER: ${{ secrets.PREVIEW_HARBOR_USER }}
+          HARBOR_PASSWORD: ${{ secrets.PREVIEW_HARBOR_PASSWORD }}
+          KEEP: ${{ vars.PREVIEW_IMAGE_KEEP || '2' }}
+          REPOSITORY: ${{ vars.PREVIEW_IMAGE_REPOSITORY || 'ventry-preview/app' }}
+        run: node .github/scripts/harbor-preview-prune.mjs "$REPOSITORY" --pr "$PR" --keep "$KEEP"
+
+      - name: Report the result
+        if: always() && steps.guard.outputs.skip != 'true'
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+          OUTCOME: ${{ job.status }}
+          SUPERSEDED: ${{ steps.deploy.outputs.superseded }}
+        run: |
+          if [[ "$SUPERSEDED" == "true" || "$OUTCOME" == "cancelled" ]]; then
+            state=inactive; status=success; description="Superseded by a newer commit or closed"
+          elif [[ "$OUTCOME" == "success" ]]; then
+            state=success; status=success; description="Preview is live"
+          else
+            state=failure; status=failure; description="Preview deployment failed; see the workflow run"
+          fi
+          if [[ -n "$DEPLOYMENT_ID" ]]; then
+            gh api -X POST "repos/$REPO/deployments/$DEPLOYMENT_ID/statuses" -f state="$state" \
+              -f environment_url="$PREVIEW_URL" -f log_url="$RUN_URL" -f description="$description" >/dev/null
+            if [[ "$state" == "success" ]]; then
+              # Older deployments of this PR now point at a replaced preview.
+              for id in $(gh api "repos/$REPO/deployments?environment=preview&task=preview:pr-$PR&per_page=100" --jq ".[] | select(.id != $DEPLOYMENT_ID) | .id"); do
+                gh api -X POST "repos/$REPO/deployments/$id/statuses" -f state=inactive >/dev/null
+              done
+            fi
+          fi
+          target="$RUN_URL"
+          [[ "$state" == "success" ]] && target="$PREVIEW_URL"
+          gh api -X POST "repos/$REPO/statuses/$SHA" -f context=preview -f state="$status" \
+            -f description="$description" -f target_url="$target" >/dev/null

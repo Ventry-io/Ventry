@@ -9,6 +9,8 @@ declare namespace NodeJS {
         BETTER_AUTH_TRUSTED_ORIGINS?: string;
         NEXTAUTH_URL?: string;
         BETTER_AUTH_SECRET: string;
+        OAUTH_PROXY_SECRET?: string;
+        OAUTH_PROXY_PRODUCTION_URL?: string;
 
 
         GOOGLE_CLIENT_ID: string;

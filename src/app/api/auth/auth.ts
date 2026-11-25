@@ -13,11 +13,13 @@ import { renderComponentToHTML } from "@/lib/helpers/html";
 import WelcomeMail from "@/components/emails/WelcomeMail";
 import EmailVerificationMail from "@/components/emails/EmailVerificationMail";
 import { getTrustedOrigins } from "@/lib/security/origins";
+import { getOAuthProxyConfig, isBlockedOAuthProxyPath, oauthProxyPlugins } from "@/lib/auth/oauth-proxy";
 import { DISPLAY_NAME_MAX_LENGTH } from "@/lib/user/display-name";
 import { signUpAdditionalFieldsSchema } from "@/types/schemas/signup";
 import { resolveUniqueUsername, sanitizeUsername, isUsernameAvailable } from "@/lib/user/unique-name";
 
 const cookiePrefix = "VENTRY";
+const oauthProxyConfig = getOAuthProxyConfig();
 
 function clampDisplayName(name: string | null | undefined) {
     return name?.slice(0, DISPLAY_NAME_MAX_LENGTH);
@@ -48,11 +50,16 @@ export const auth = betterAuth({
 
                 },
             }
-        })
+        }),
+        // Staging callback host and approved PR previews only; see docs/pr-previews.md.
+        ...oauthProxyPlugins(oauthProxyConfig),
     ],
     session: {},
     hooks: {
         before: createAuthMiddleware(async (ctx) => {
+            if (isBlockedOAuthProxyPath(oauthProxyConfig, ctx.path)) {
+                throw new APIError("NOT_FOUND");
+            }
             if (["/sign-in/email", "/sign-up/email", "/sign-in/social", "/passkey/verify-authentication"].includes(ctx.path)) {
                 if (!await verifyTurnstile(ctx.headers)) {
                     throw new APIError("FORBIDDEN", { message: "Security check failed or expired. Please retry." });

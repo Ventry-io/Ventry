@@ -36,3 +36,6 @@ jobs:
 
       - name: Check Renovate issue workflow exemptions
         run: node --test .github/scripts/renovate.node-test.mjs
+
+      - name: Test PR preview scripts
+        run: node --test .github/scripts/harbor-preview-prune.node-test.mjs .github/scripts/preview-sh.node-test.mjs

@@ -34,7 +34,7 @@
     "db:migrate": "./scripts/prisma-migrate-dev.mjs"
   },
   "dependencies": {
-    "@better-auth/passkey": "^1.7.25",
+    "@better-auth/passkey": "^1.7.28",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -67,7 +67,7 @@
     "@zxcvbn-ts/language-en": "^4.1.2",
     "@zxing/browser": "^0.2.0",
     "bcrypt": "^6.0.0",
-    "better-auth": "^1.7.25",
+    "better-auth": "^1.7.28",
     "ioredis": "^6.0.0",
     "jotai": "^2.15.0",
     "jsonwebtoken": "^9.0.2",
